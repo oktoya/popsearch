@@ -135,35 +135,35 @@ export async function askApi(
 
     const controller = new AbortController();
     currentAbort = controller;
-    let stream;
-    if (model === "haiku") {
-      const params: Anthropic.MessageStreamParams = {
-        model: MODEL_IDS.haiku,
-        max_tokens: 16000,
-        output_config: { effort },
-        system,
-        messages: messages as Anthropic.MessageParam[],
-      };
-      if (webSearch) {
-        params.tools = [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }];
-      }
-      stream = client.messages.stream(params, { signal: controller.signal });
-    } else {
-      // Sonnet/Opus: beta endpoint with server-side refusal fallbacks.
-      const params: Anthropic.Beta.Messages.MessageCreateParams = {
-        model: MODEL_IDS[model],
-        max_tokens: 16000,
-        output_config: { effort },
-        system,
-        messages,
-        betas: ["server-side-fallback-2026-07-01"],
-        fallbacks: "default",
-      };
-      if (webSearch) {
-        params.tools = [{ type: "web_search_20260209", name: "web_search", max_uses: 5 }];
-      }
-      stream = client.beta.messages.stream(params, { signal: controller.signal });
+    // Every model: beta endpoint with thinking block-binding controls so a changed
+    // tools list or model switch drops stale thinking blocks instead of a 400.
+    const betas = ["thinking-binding-controls-2026-08-01"];
+    if (model !== "haiku") betas.push("server-side-fallback-2026-07-01");
+    const params = {
+      model: MODEL_IDS[model],
+      max_tokens: 16000,
+      thinking: {
+        type: "adaptive",
+        block_binding: { prefix_mismatch_behavior: "drop_block" },
+      },
+      output_config: { effort },
+      system,
+      messages,
+      betas,
+    } as unknown as Anthropic.Beta.Messages.MessageCreateParams;
+    if (model !== "haiku") {
+      (params as unknown as Record<string, unknown>).fallbacks = "default";
     }
+    if (webSearch) {
+      params.tools = [
+        {
+          type: model === "haiku" ? "web_search_20250305" : "web_search_20260209",
+          name: "web_search",
+          max_uses: 5,
+        },
+      ];
+    }
+    const stream = client.beta.messages.stream(params, { signal: controller.signal });
     let statusShown = false;
     for await (const event of stream) {
       if (generation !== myGeneration) return;
