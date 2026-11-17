@@ -1,4 +1,5 @@
 mod history;
+mod keyhook;
 mod office;
 mod provider_cli;
 mod selection;
@@ -157,6 +158,8 @@ fn set_hotkey(
         }
         return Err(e);
     }
+    #[cfg(windows)]
+    keyhook::set_hotkey(accelerator.as_str());
     if let Ok(mut g) = state.0.lock() {
         *g = None;
     }
@@ -230,6 +233,15 @@ pub fn run() {
                 Ok(()) => None,
                 Err(e) => Some(e.to_string()),
             };
+            #[cfg(windows)]
+            {
+                keyhook::install();
+                if hotkey_error.is_none() {
+                    keyhook::set_hotkey(hotkey.as_str());
+                } else {
+                    keyhook::disable();
+                }
+            }
             let failed = hotkey_error.is_some();
             app.manage(HotkeyError(std::sync::Mutex::new(hotkey_error)));
             if failed {
