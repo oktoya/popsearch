@@ -1,4 +1,4 @@
-# 팝서치 (PopSearch) 설계
+# 팝써치 (PopSearch) 설계
 
 전역 단축키로 바로 띄우는 AI 검색창. Windows 먼저, macOS 공용 구조.
 
