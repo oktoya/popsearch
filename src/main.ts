@@ -1,0 +1,621 @@
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { renderMarkdown } from "./render";
+import { copyAnswer, copyBlock, copyCodeBlock, flashCopied } from "./copy";
+import { askApi, resetConversation, type ModelKey } from "./provider_api";
+import { fileToAttachment, rawImageToAttachment, MAX_ATTACHMENTS, type Attachment } from "./images";
+import { initSettingsPanel, loadSettings, capturingHotkey, type Settings } from "./settings";
+import { normalizeFences } from "./export";
+import { initHistoryPanel, type ConversationDetail } from "./history";
+
+const input = document.getElementById("query") as HTMLTextAreaElement;
+const results = document.getElementById("results") as HTMLDivElement;
+
+const chips = document.getElementById("chips") as HTMLDivElement;
+let attachments: Attachment[] = [];
+
+const attachError = document.createElement("div");
+attachError.id = "attach-error";
+attachError.hidden = true;
+chips.after(attachError);
+let attachErrorTimer = 0;
+
+function showAttachError(msg: string) {
+  attachError.textContent = msg;
+  attachError.hidden = false;
+  clearTimeout(attachErrorTimer);
+  attachErrorTimer = window.setTimeout(() => {
+    attachError.hidden = true;
+  }, 4000);
+}
+
+function truncateName(name: string): string {
+  const chars = Array.from(name);
+  return chars.length > 24 ? chars.slice(0, 24).join("") + "…" : name;
+}
+
+function renderChips() {
+  chips.textContent = "";
+  attachments.forEach((att, i) => {
+    const chip = document.createElement("div");
+    chip.className = "chip";
+    if (att.kind === "image") {
+      const img = document.createElement("img");
+      img.src = att.thumb;
+      chip.appendChild(img);
+    } else {
+      chip.classList.add("file-chip");
+      const label = document.createElement("span");
+      label.className = "chip-name";
+      label.textContent = "📄 " + truncateName(att.name);
+      chip.appendChild(label);
+    }
+    const rm = document.createElement("button");
+    rm.type = "button";
+    rm.className = "chip-remove";
+    rm.textContent = "\u2715";
+    rm.addEventListener("click", () => {
+      attachments.splice(i, 1);
+      renderChips();
+      input.focus();
+    });
+    chip.appendChild(rm);
+    chips.appendChild(chip);
+  });
+  chips.hidden = attachments.length === 0;
+  updateModelPill();
+}
+
+function clearAttachments() {
+  attachments = [];
+  renderChips();
+}
+
+async function addFiles(files: File[]) {
+  for (const file of files) {
+    if (attachments.length >= MAX_ATTACHMENTS) break;
+    try {
+      const res = await fileToAttachment(file);
+      if ("error" in res) {
+        showAttachError(res.error);
+      } else if (attachments.length < MAX_ATTACHMENTS) {
+        attachments.push(res.att);
+        renderChips();
+      }
+    } catch (_) {
+      showAttachError(`지원하지 않는 형식입니다: ${file.name}`);
+    }
+  }
+}
+
+input.addEventListener("paste", (e) => {
+  const items = Array.from(e.clipboardData?.items ?? []);
+  const files = items
+    .filter((it) => it.kind === "file")
+    .map((it) => it.getAsFile())
+    .filter((f): f is File => f !== null);
+  if (files.length === 0) return;
+  e.preventDefault();
+  addFiles(files);
+});
+
+window.addEventListener("dragover", (e) => e.preventDefault());
+window.addEventListener("drop", (e) => {
+  e.preventDefault();
+  const files = Array.from(e.dataTransfer?.files ?? []);
+  if (files.length > 0) addFiles(files);
+});
+
+let currentAnswer: HTMLDivElement | null = null;
+let currentRaw = "";
+let renderQueued = false;
+let renderFrame = 0;
+let settings: Settings = {
+  provider: "cli",
+  web_search: false,
+  hotkey: "CommandOrControl+Shift+Space",
+  capture_selection: true,
+  default_model: "haiku",
+};
+let conversationId: number | null = null;
+let convEpoch = 0;
+let pendingSave: {
+  text: string;
+  thumbs: string[];
+  provider: string;
+  model: ModelKey;
+  imageCount: number;
+  fileNames: string[];
+  ctxKey: string;
+} | null = null;
+
+interface Turn {
+  question: string;
+  answer: string;
+  model: string;
+  imageCount: number;
+  fileNames: string[];
+}
+// Finished turns of the live conversation, and how many of them each context
+// (API: "api"; CLI: one per model key) has already seen.
+let transcript: Turn[] = [];
+let seenCounts: Record<string, number> = {};
+
+const PREFIX_KEYS: Record<string, ModelKey> = {
+  h: "haiku",
+  "ㅗ": "haiku",
+  s: "sonnet",
+  "ㄴ": "sonnet",
+  o: "opus",
+  "ㅐ": "opus",
+};
+
+function defaultModel(): ModelKey {
+  const m = settings.default_model;
+  return m === "sonnet" || m === "opus" ? m : "haiku";
+}
+
+function parseModel(
+  text: string,
+  hasImages: boolean,
+): { model: ModelKey; text: string; prefixed: boolean } {
+  if (text.length >= 2 && text[0] === "/") {
+    const model = PREFIX_KEYS[text[1].toLowerCase()];
+    if (model) {
+      if (text.length >= 3 && text[2] === " ") return { model, text: text.slice(3), prefixed: true };
+      if (hasImages && text.length === 2) return { model, text: "", prefixed: true };
+    }
+  }
+  return { model: defaultModel(), text, prefixed: false };
+}
+
+const MODEL_NAMES: Record<ModelKey, string> = { haiku: "Haiku", sonnet: "Sonnet", opus: "Opus" };
+const modelPill = document.getElementById("model-pill") as HTMLSpanElement;
+
+function updateModelPill() {
+  const parsed = parseModel(input.value, attachments.length > 0);
+  modelPill.textContent = MODEL_NAMES[parsed.model] + (parsed.prefixed ? " (이번만)" : "");
+  modelPill.classList.toggle("once", parsed.prefixed);
+}
+
+function transcriptToContextText(turns: Turn[]): string {
+  const parts: string[] = [];
+  for (const t of turns) {
+    parts.push("## 질문");
+    if (t.question.trim() !== "") parts.push(t.question);
+    for (let i = 0; i < t.imageCount; i++) parts.push("(이미지 첨부됨)");
+    for (const n of t.fileNames) parts.push(`(파일 첨부됨: ${n})`);
+    parts.push("## 답변");
+    parts.push(normalizeFences(t.answer));
+  }
+  return parts.join("\n\n") + "\n";
+}
+
+function buildProviderText(text: string, ctxKey: string): string {
+  const unseen = transcript.slice(seenCounts[ctxKey] ?? 0);
+  if (unseen.length === 0) return text;
+  return (
+    "다음은 이전 대화 기록입니다. 이 맥락을 이어서 마지막 질문에 답하세요.\n\n" +
+    "<previous_conversation>\n" +
+    transcriptToContextText(unseen) +
+    "\n</previous_conversation>\n\n" +
+    "질문: " +
+    text
+  );
+}
+
+const panel = initSettingsPanel((s) => {
+  settings = s;
+  updateModelPill();
+});
+loadSettings().then((s) => {
+  settings = s;
+  updateModelPill();
+});
+
+function buildQuestion(
+  text: string,
+  thumbs: string[],
+  model: string,
+  fileNames: string[] = [],
+): HTMLDivElement {
+  const q = document.createElement("div");
+  q.className = "question";
+  if (thumbs.length > 0 || fileNames.length > 0) {
+    const row = document.createElement("div");
+    row.className = "question-images";
+    thumbs.forEach((src) => {
+      const img = document.createElement("img");
+      img.src = src;
+      row.appendChild(img);
+    });
+    fileNames.forEach((n) => {
+      const f = document.createElement("span");
+      f.className = "file-chip-static";
+      f.textContent = "📄 " + truncateName(n);
+      row.appendChild(f);
+    });
+    q.appendChild(row);
+  }
+  const label = document.createElement("div");
+  if (model === "sonnet" || model === "opus") {
+    const badge = document.createElement("span");
+    badge.className = "model-badge";
+    badge.textContent = model === "sonnet" ? "Sonnet" : "Opus";
+    label.appendChild(badge);
+  }
+  label.appendChild(document.createTextNode(text));
+  q.appendChild(label);
+  return q;
+}
+
+const DEFAULT_PLACEHOLDER = "무엇이든 물어보세요";
+
+function renderMessages(body: HTMLElement, conv: ConversationDetail) {
+  conv.messages.forEach((m) => {
+    const a = document.createElement("div");
+    a.className = "answer";
+    a.innerHTML = renderMarkdown(m.answer);
+    body.appendChild(buildQuestion(m.question, m.images, m.model));
+    body.appendChild(a);
+    addCopyButtons(a);
+  });
+}
+
+const historyPanel = initHistoryPanel({
+  renderConversation: renderMessages,
+  onOpen: () => panel.close(),
+  onViewChange: (conv) => {
+    if (!conv) {
+      input.placeholder = DEFAULT_PLACEHOLDER;
+      return;
+    }
+    const t = conv.title.length > 30 ? conv.title.slice(0, 30) + "…" : conv.title;
+    input.placeholder = `「${t}」에 이어서 질문`;
+  },
+  onDeleted: (id) => {
+    if (conversationId === id) conversationId = null;
+  },
+});
+document.getElementById("settings-btn")!.addEventListener("click", () => {
+  historyPanel.close();
+});
+
+invoke<string | null>("get_hotkey_error").then(async (err) => {
+  if (!err) return;
+  historyPanel.close();
+  await panel.open();
+  const stored = await loadSettings();
+  panel.showHotkeyMessage(
+    `단축키(${stored.hotkey})를 등록하지 못했습니다. 다른 단축키를 지정하세요.`,
+  );
+});
+
+function renderCurrent() {
+  renderQueued = false;
+  if (!currentAnswer) return;
+  currentAnswer.innerHTML = renderMarkdown(currentRaw);
+  scrollToBottom();
+}
+
+function scheduleRender() {
+  if (renderQueued) return;
+  renderQueued = true;
+  renderFrame = requestAnimationFrame(renderCurrent);
+}
+
+function cancelPendingRender() {
+  if (renderQueued) cancelAnimationFrame(renderFrame);
+  renderQueued = false;
+}
+
+function addCopyButtons(answer: HTMLDivElement) {
+  Array.from(answer.children).forEach((child) => {
+    if (!(child instanceof HTMLElement)) return;
+    if (child.tagName === "HR") return;
+    if (child.classList.contains("code-block")) return;
+    child.classList.add("has-copy");
+    const btn = document.createElement("button");
+    btn.className = "copy-btn block-copy";
+    btn.textContent = "복사";
+    child.appendChild(btn);
+  });
+  const actions = document.createElement("div");
+  actions.className = "answer-actions";
+  const all = document.createElement("button");
+  all.className = "copy-all";
+  all.textContent = "전체 복사";
+  actions.appendChild(all);
+  answer.after(actions);
+}
+
+function scrollToBottom() {
+  results.scrollTop = results.scrollHeight;
+}
+
+function enableInput(focus: boolean) {
+  input.disabled = false;
+  if (focus) input.focus();
+}
+
+function send(text: string, model: ModelKey) {
+  const atts = attachments;
+  clearAttachments();
+  historyPanel.close();
+  const thumbs: string[] = [];
+  const fileNames: string[] = [];
+  for (const a of atts) {
+    if (a.kind === "image") thumbs.push(a.thumb);
+    else fileNames.push(a.name);
+  }
+  const q = buildQuestion(text, thumbs, model, fileNames);
+  const ctxKey = settings.provider === "api" ? "api" : model;
+  const providerText = buildProviderText(text, ctxKey);
+  pendingSave = {
+    text,
+    thumbs,
+    provider: settings.provider,
+    model,
+    imageCount: thumbs.length,
+    fileNames,
+    ctxKey,
+  };
+  const a = document.createElement("div");
+  a.className = "answer";
+  results.appendChild(q);
+  results.appendChild(a);
+  currentAnswer = a;
+  currentRaw = "";
+  input.value = "";
+  autoGrow();
+  input.disabled = true;
+  scrollToBottom();
+  if (settings.provider === "api") {
+    askApi(providerText, atts, settings.web_search, model, { onChunk, onDone, onError });
+  } else {
+    invoke("ask", {
+      text: providerText,
+      model,
+      attachments: atts.map((a) =>
+        a.kind === "image"
+          ? { kind: "image", media_type: a.mediaType, data: a.data, name: a.name }
+          : a.kind === "pdf"
+            ? { kind: "pdf", media_type: "application/pdf", data: a.data, name: a.name }
+            : { kind: "text", text: a.text, name: a.name },
+      ),
+    });
+  }
+}
+
+function autoGrow() {
+  input.style.height = "auto";
+  const lh = parseFloat(getComputedStyle(input).lineHeight) || 28;
+  const pad = input.offsetHeight - input.clientHeight;
+  const maxH = lh * 6 + 32 + pad;
+  input.style.height = Math.min(input.scrollHeight + pad, maxH) + "px";
+  updateModelPill();
+}
+input.addEventListener("input", autoGrow);
+
+listen<{ media_type: string; data: string }>("popsearch://selection-image", (e) => {
+  if (attachments.length >= MAX_ATTACHMENTS) return;
+  rawImageToAttachment(e.payload)
+    .then((att) => {
+      if (att && attachments.length < MAX_ATTACHMENTS) {
+        attachments.push(att);
+        renderChips();
+      }
+    })
+    .catch(() => {});
+});
+
+listen<{
+  selection: string | null;
+  image?: { media_type: string; data: string } | null;
+}>("popsearch://shown", (e) => {
+  const sel = e.payload?.selection;
+  const img = e.payload?.image;
+  if (img) {
+    rawImageToAttachment(img)
+      .then((att) => {
+        if (att && attachments.length < MAX_ATTACHMENTS) {
+          attachments.push(att);
+          renderChips();
+        }
+      })
+      .catch(() => {});
+  }
+  input.focus();
+  if (typeof sel === "string" && sel.trim() !== "") {
+    input.value = sel;
+    input.setSelectionRange(sel.length, sel.length);
+    autoGrow();
+    input.scrollTop = input.scrollHeight;
+  } else {
+    input.select();
+  }
+});
+
+function onChunk(text: string) {
+  if (!currentAnswer) return;
+  currentRaw += text;
+  scheduleRender();
+}
+
+async function onDone() {
+  cancelPendingRender();
+  if (currentAnswer) {
+    renderCurrent();
+    addCopyButtons(currentAnswer);
+    scrollToBottom();
+  }
+  const save = pendingSave;
+  pendingSave = null;
+  if (save) {
+    transcript.push({
+      question: save.text,
+      answer: currentRaw,
+      model: save.model,
+      imageCount: save.imageCount,
+      fileNames: save.fileNames,
+    });
+    seenCounts[save.ctxKey] = transcript.length;
+    const epoch = convEpoch;
+    try {
+      const id = await invoke<number>("history_add", {
+        conversationId,
+        provider: save.provider,
+        model: save.model,
+        question: save.text + save.fileNames.map((n) => `\n(첨부: ${n})`).join(""),
+        images: save.thumbs,
+        answer: currentRaw,
+      });
+      if (epoch === convEpoch) conversationId = id;
+    } catch (_) {
+      // history is best-effort; do not block the conversation
+    }
+  }
+  enableInput(true);
+}
+
+function onError(message: string) {
+  cancelPendingRender();
+  pendingSave = null;
+  if (currentAnswer) {
+    currentRaw = "";
+    currentAnswer.textContent = message;
+    currentAnswer.classList.add("error");
+  }
+  enableInput(true);
+}
+
+listen<{ text: string }>("popsearch://chunk", (e) => onChunk(e.payload.text));
+listen("popsearch://done", () => onDone());
+listen<{ message: string }>("popsearch://error", (e) => onError(e.payload.message));
+
+async function onResultsClick(e: MouseEvent) {
+  const target = e.target as HTMLElement;
+  const link = target.closest("a");
+  if (link && link.href) {
+    e.preventDefault();
+    openUrl(link.href);
+    return;
+  }
+  const btn = target.closest("button") as HTMLButtonElement | null;
+  if (!btn) return;
+  try {
+    if (btn.classList.contains("copy-all")) {
+      const answer = btn.parentElement?.previousElementSibling as HTMLElement | null;
+      if (!answer) return;
+      await copyAnswer(answer);
+      flashCopied(btn, "전체 복사");
+    } else if (btn.dataset.copy === "code") {
+      const block = btn.closest(".code-block") as HTMLElement | null;
+      if (!block) return;
+      await copyCodeBlock(block);
+      flashCopied(btn);
+    } else if (btn.classList.contains("block-copy")) {
+      const block = btn.parentElement as HTMLElement | null;
+      if (!block) return;
+      await copyBlock(block);
+      flashCopied(btn);
+    }
+  } catch (_) {
+    // clipboard write failed; leave the button unchanged
+  }
+}
+results.addEventListener("click", onResultsClick);
+document.getElementById("history-view-body")!.addEventListener("click", onResultsClick);
+
+async function resetAll() {
+  cancelPendingRender();
+  convEpoch++;
+  conversationId = null;
+  pendingSave = null;
+  transcript = [];
+  seenCounts = {};
+  resetConversation();
+  await invoke("new_conversation");
+  results.textContent = "";
+  currentAnswer = null;
+  input.value = "";
+  autoGrow();
+  clearAttachments();
+  enableInput(false);
+}
+
+async function continueFrom(conv: ConversationDetail) {
+  cancelPendingRender();
+  convEpoch++;
+  pendingSave = null;
+  transcript = conv.messages.map((m) => ({
+    question: m.question,
+    answer: m.answer,
+    model: m.model,
+    imageCount: m.images.length,
+    fileNames: [],
+  }));
+  seenCounts = {};
+  resetConversation();
+  await invoke("new_conversation");
+  results.textContent = "";
+  currentAnswer = null;
+  renderMessages(results, conv);
+  conversationId = conv.id;
+}
+
+input.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  if (e.isComposing || e.keyCode === 229) return;
+  if (e.shiftKey) return;
+  e.preventDefault();
+  const parsed = parseModel(input.value, attachments.length > 0);
+  const text = parsed.text;
+  if (text.trim() === "" && attachments.length === 0) return;
+  if (historyPanel.isViewing()) {
+    const conv = historyPanel.viewing();
+    if (!conv) return;
+    historyPanel.close();
+    const keepAttachments = attachments;
+    input.disabled = true;
+    continueFrom(conv).then(() => {
+      attachments = keepAttachments;
+      renderChips();
+      send(text, parsed.model);
+    });
+    return;
+  }
+  send(text, parsed.model);
+});
+
+window.addEventListener("keydown", async (e) => {
+  if (capturingHotkey) return;
+  if (e.key === "F5") {
+    e.preventDefault();
+    if (panel.isOpen()) {
+      panel.close();
+    } else {
+      historyPanel.close();
+      panel.toggle();
+    }
+    return;
+  }
+  if (e.key === "Escape") {
+    e.preventDefault();
+    if (panel.isOpen()) {
+      panel.close();
+      return;
+    }
+    if (historyPanel.isOpen()) {
+      historyPanel.close();
+      return;
+    }
+    await resetAll();
+    invoke("hide_window");
+  }
+  if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "h" || e.key === "H")) {
+    e.preventDefault();
+    historyPanel.toggle();
+  }
+});

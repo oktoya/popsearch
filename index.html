@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PopSearch</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <div id="bar">
+      <textarea id="query" rows="1" placeholder="무엇이든 물어보세요" autocomplete="off" spellcheck="false"></textarea>
+      <span id="model-pill" title="다음 질문에 쓸 모델">Haiku</span>
+      <button id="history-btn" type="button" title="기록 (Ctrl+H)">🕘</button>
+      <button id="settings-btn" type="button" title="설정">⚙</button>
+    </div>
+    <div id="chips" hidden></div>
+    <div id="results"></div>
+    <div id="history" hidden>
+      <input id="history-search" type="text" placeholder="기록 검색" autocomplete="off" spellcheck="false" />
+      <div id="history-list"></div>
+    </div>
+    <div id="history-view" hidden>
+      <div id="history-view-bar">
+        <span id="history-view-title"></span>
+        <button id="history-export" type="button">MD로 저장</button>
+        <button id="history-delete" type="button">삭제</button>
+        <button id="history-close" type="button">닫기</button>
+      </div>
+      <div id="history-view-body"></div>
+    </div>
+    <div id="settings" hidden>
+      <div class="setting-row">
+        <div class="setting-label">공급자</div>
+        <label><input type="radio" name="provider" value="cli" /> CLI (구독)</label>
+        <label><input type="radio" name="provider" value="api" /> API (API 키)</label>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">기본 모델</div>
+        <label><input type="radio" name="default-model" value="haiku" /> Haiku</label>
+        <label><input type="radio" name="default-model" value="sonnet" /> Sonnet</label>
+        <label><input type="radio" name="default-model" value="opus" /> Opus</label>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">API 키</div>
+        <input id="api-key" type="password" autocomplete="off" spellcheck="false" />
+        <button id="api-key-save" type="button">저장</button>
+        <button id="api-key-delete" type="button" hidden>키 삭제</button>
+        <span id="api-key-status"></span>
+      </div>
+      <div class="setting-row">
+        <label><input id="web-search" type="checkbox" /> 웹 검색 (API 전용)</label>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">단축키</div>
+        <input id="hotkey" type="text" readonly />
+        <button id="hotkey-change" type="button">변경</button>
+        <button id="hotkey-reset" type="button">기본값</button>
+      </div>
+      <div class="setting-row">
+        <label><input id="capture-selection" type="checkbox" /> 단축키로 열 때 선택한 텍스트 가져오기</label>
+      </div>
+      <div class="setting-msg setting-note">선택한 텍스트를 바로 읽어 옵니다. 일부 앱에서는 클립보드를 거쳐 가져온 뒤 원래 내용으로 되돌립니다.</div>
+      <div class="setting-row">
+        <label><input id="autostart" type="checkbox" /> <span id="autostart-label">Windows 시작 시 자동 실행</span></label>
+      </div>
+      <div id="autostart-note" class="setting-msg setting-note" hidden>설치본에서만 적용됩니다</div>
+      <div id="hotkey-msg" class="setting-msg" hidden></div>
+    </div>
+  </body>
+</html>
