@@ -229,9 +229,15 @@ body {
   padding-left: 24px;
 }
 
-.answer a {
+.answer a,
+.question a {
   color: var(--hl-title);
   cursor: pointer;
+}
+
+.answer a:hover,
+.question a:hover {
+  text-decoration: underline;
 }
 
 .answer table {

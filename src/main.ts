@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { renderMarkdown } from "./render";
+import { renderMarkdown, linkifyToNodes } from "./render";
 import { copyAnswer, copyBlock, copyCodeBlock, flashCopied } from "./copy";
 import { askApi, resetConversation, type ModelKey, type Source } from "./provider_api";
 import { fileToAttachment, rawImageToAttachment, MAX_ATTACHMENTS, type Attachment } from "./images";
@@ -287,7 +287,7 @@ function buildQuestion(
     badge.textContent = model === "sonnet" ? "Sonnet" : "Opus";
     label.appendChild(badge);
   }
-  label.appendChild(document.createTextNode(text));
+  linkifyToNodes(text).forEach((n) => label.appendChild(n));
   q.appendChild(label);
   return q;
 }
@@ -714,6 +714,8 @@ async function onResultsClick(e: MouseEvent) {
   const link = target.closest("a");
   if (link && link.href) {
     e.preventDefault();
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.toString() !== "") return;
     openUrl(link.href);
     return;
   }
