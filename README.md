@@ -1,4 +1,4 @@
-# 팝서치 (PopSearch)
+# 팝써치(PopSearch)
 
 전역 단축키로 바로 띄우는 Claude 검색창입니다. 맥의 Spotlight처럼 어디서든 단축키를 누르면 창이 뜨고, 질문하면 Claude가 답합니다.
 
@@ -26,7 +26,7 @@
 
 ### WebView2 런타임 (Windows)
 
-팝서치는 화면을 그리는 데 Microsoft **WebView2 런타임**을 씁니다.
+팝써는 화면을 그리는 데 Microsoft **WebView2 런타임**을 씁니다.
 
 - **Windows 11**: 기본 포함되어 있습니다.
 - **Windows 10**: 대부분 Edge와 함께 이미 설치되어 있습니다. 다만 LTSC 판이나 Edge를 제거한 PC에는 없을 수 있습니다.
@@ -41,13 +41,13 @@
   claude
   ```
   (`claude`를 처음 실행하면 로그인 안내가 나옵니다.)
-- 팝서치는 `PATH`에서 `claude.exe`를 찾습니다. npm으로 설치했다면 자동으로 찾습니다. 다른 곳에 있다면 환경 변수 `POPSEARCH_CLAUDE_BIN`에 `claude.exe`의 전체 경로를 지정하세요.
+- 팝써치는 `PATH`에서 `claude.exe`를 찾습니다. npm으로 설치했다면 자동으로 찾습니다. 다른 곳에 있다면 환경 변수 `POPSEARCH_CLAUDE_BIN`에 `claude.exe`의 전체 경로를 지정하세요.
 - 질문은 구독의 사용 한도에서 차감됩니다. Claude Code로 하는 다른 작업과 한도를 함께 씁니다.
 
 ### API 방식을 쓸 때
 
 - [Claude 개발자 플랫폼](https://platform.claude.com)에서 API 키를 발급받고 크레딧을 충전하세요. 선불이며 최소 $5입니다.
-- 팝서치 설정(`F5`)에서 공급자를 **API**로 바꾸고 키를 붙여넣은 뒤 `저장`을 누르세요.
+- 팝써치 설정(`F5`)에서 공급자를 **API**로 바꾸고 키를 붙여넣은 뒤 `저장`을 누르세요.
 - API 방식에서만 **웹 검색**을 켤 수 있습니다. 검색 비용이 별도로 붙습니다.
 
 ## 설치
