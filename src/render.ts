@@ -27,41 +27,46 @@ md.renderer.rules.fence = (tokens, idx) => {
   );
 };
 
-// Hangul / CJK / full-width characters (a URL stops before these, except in a path after "/").
+// Hangul / CJK / full-width characters (a URL stops before these only in the host part).
 const CJK_RE = /[ᄀ-ᇿ　-ヿ㄰-㆏㐀-鿿가-힣豈-﫿＀-￯]/;
 
 // Length of the URL at the start of `s` (which must begin with a scheme or "www.").
 export function urlLength(s: string): number {
+  const schemeEnd = s.indexOf("://");
+  let inHost = true;
+  let hostFrom = schemeEnd >= 0 ? schemeEnd + 3 : 0;
   let end = 0;
-  let prevCjkOk = false;
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
     if (/\s/.test(c) || c === "<" || c === ">") break;
-    if (CJK_RE.test(c)) {
-      if (i > 0 && (s[i - 1] === "/" || prevCjkOk)) {
-        prevCjkOk = true;
-      } else {
-        break;
-      }
-    } else {
-      prevCjkOk = false;
-    }
+    if (i >= hostFrom && inHost && (c === "/" || c === "?" || c === "#")) inHost = false;
+    if (CJK_RE.test(c) && inHost) break;
     end = i + 1;
   }
   let url = s.slice(0, end);
-  for (;;) {
-    const last = url[url.length - 1];
-    if (last === undefined) break;
-    if (".,!?'\"]".includes(last)) {
-      url = url.slice(0, -1);
-    } else if (last === ")") {
-      const open = url.split("(").length - 1;
-      const close = url.split(")").length - 1;
-      if (close > open) url = url.slice(0, -1);
-      else break;
-    } else {
-      break;
+  const trimPunct = () => {
+    for (;;) {
+      const last = url[url.length - 1];
+      if (last === undefined) break;
+      if (".,!?'\"]".includes(last)) {
+        url = url.slice(0, -1);
+      } else if (last === ")") {
+        const open = url.split("(").length - 1;
+        const close = url.split(")").length - 1;
+        if (close > open) url = url.slice(0, -1);
+        else break;
+      } else {
+        break;
+      }
     }
+  };
+  trimPunct();
+  // Korean particles glued to an ASCII path ("/page에서") are not part of the URL.
+  let k = url.length;
+  while (k > 0 && CJK_RE.test(url[k - 1])) k--;
+  if (k < url.length && k > 0 && /[A-Za-z0-9]/.test(url[k - 1])) {
+    url = url.slice(0, k);
+    trimPunct();
   }
   return url.length;
 }
