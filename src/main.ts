@@ -192,7 +192,20 @@ function parseModel(
 ): { model: ModelKey; text: string; prefixed: boolean } {
   const d = decidePrefix(text, hasImages, prefixCode);
   if (d) return { model: d.model, text: d.text, prefixed: true };
+  if (modelOverride) return { model: modelOverride, text, prefixed: true };
   return { model: defaultModel(), text, prefixed: false };
+}
+
+// One-question model override set with Alt+Up / Alt+Down (null = none).
+let modelOverride: ModelKey | null = null;
+const MODEL_ORDER: ModelKey[] = ["haiku", "sonnet", "opus"];
+
+function stepModel(dir: 1 | -1) {
+  const cur = parseModel(input.value, attachments.length > 0).model;
+  const idx = MODEL_ORDER.indexOf(cur) + dir;
+  if (idx < 0 || idx >= MODEL_ORDER.length) return;
+  modelOverride = MODEL_ORDER[idx];
+  updateModelPill();
 }
 
 const MODEL_NAMES: Record<ModelKey, string> = { haiku: "Haiku", sonnet: "Sonnet", opus: "Opus" };
@@ -539,6 +552,7 @@ function send(text: string, model: ModelKey) {
   currentRaw = "";
   input.value = "";
   prefixCode = null;
+  modelOverride = null;
   autoGrow();
   input.disabled = true;
   scrollToBottom();
@@ -767,6 +781,7 @@ async function resetAll() {
   currentAnswer = null;
   input.value = "";
   prefixCode = null;
+  modelOverride = null;
   autoGrow();
   clearAttachments();
   enableInput(false);
@@ -790,6 +805,8 @@ async function continueFrom(conv: ConversationDetail) {
   currentAnswer = null;
   renderMessages(results, conv);
   conversationId = conv.id;
+  modelOverride = null;
+  updateModelPill();
   focusQuery();
 }
 
@@ -844,6 +861,19 @@ window.addEventListener("keydown", async (e) => {
     if (!ae || (ae.tagName !== "INPUT" && ae.tagName !== "TEXTAREA")) {
       input.focus();
     }
+  }
+  if (
+    e.altKey &&
+    !e.ctrlKey &&
+    !e.metaKey &&
+    !e.shiftKey &&
+    (e.key === "ArrowUp" || e.key === "ArrowDown") &&
+    !panel.isOpen() &&
+    !historyPanel.isListOpen()
+  ) {
+    e.preventDefault();
+    stepModel(e.key === "ArrowUp" ? 1 : -1);
+    return;
   }
   if (e.key === "F5") {
     e.preventDefault();
