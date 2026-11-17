@@ -161,6 +161,11 @@ export async function askApi(
           name: "web_search",
           max_uses: 5,
         },
+        {
+          type: model === "haiku" ? "web_fetch_20250910" : "web_fetch_20260209",
+          name: "web_fetch",
+          max_uses: 3,
+        },
       ];
     }
     const stream = client.beta.messages.stream(params, { signal: controller.signal });
@@ -174,6 +179,13 @@ export async function askApi(
       ) {
         statusShown = true;
         handlers.onStatus?.("🔎 웹 검색 중…");
+      } else if (
+        event.type === "content_block_start" &&
+        event.content_block.type === "server_tool_use" &&
+        event.content_block.name === "web_fetch"
+      ) {
+        statusShown = true;
+        handlers.onStatus?.("🌐 페이지 읽는 중…");
       } else if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
         if (statusShown) {
           statusShown = false;
