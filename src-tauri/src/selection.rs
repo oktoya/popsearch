@@ -353,6 +353,37 @@ fn is_excluded(class: &str, exe_name: &str) -> bool {
     !exe.is_empty() && EXCLUDED_EXES.contains(&exe.as_str())
 }
 
+/// True when the clipboard carries a "copied from an empty selection (whole line)" marker.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn is_line_copy(format_names: &[String], vscode_data: Option<&str>) -> bool {
+    if format_names
+        .iter()
+        .any(|n| n == "MSDEVLineSelect" || n == "VisualStudioEditorOperationsLineCutCopyClipboardTag")
+    {
+        return true;
+    }
+    if let Some(data) = vscode_data {
+        let compact: String = data.chars().filter(|c| !c.is_whitespace()).collect();
+        return compact.contains("\"isFromEmptySelection\":true");
+    }
+    false
+}
+
+/// Decodes marker text that may be UTF-16LE (BOM or NUL bytes) or UTF-8.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn decode_marker_text(bytes: &[u8]) -> String {
+    if bytes.len() >= 2 && bytes.len() % 2 == 0 && (bytes[0] == 0xFF && bytes[1] == 0xFE || bytes[1] == 0) {
+        let units: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .take_while(|&u| u != 0)
+            .collect();
+        return String::from_utf16_lossy(&units);
+    }
+    let b: Vec<u8> = bytes.iter().copied().take_while(|&x| x != 0).collect();
+    String::from_utf8_lossy(&b).into_owned()
+}
+
 /// Blocking. Reads the current selection of the foreground app.
 pub fn capture_selection() -> Selection {
     #[cfg(windows)]
@@ -401,7 +432,8 @@ mod win {
     use std::ptr::null_mut;
     use windows_sys::Win32::System::DataExchange::{
         CloseClipboard, EmptyClipboard, EnumClipboardFormats, GetClipboardData,
-        GetClipboardSequenceNumber, IsClipboardFormatAvailable, OpenClipboard,
+        GetClipboardFormatNameW, GetClipboardSequenceNumber, IsClipboardFormatAvailable,
+        OpenClipboard,
         RegisterClipboardFormatW, SetClipboardData,
     };
     use windows_sys::Win32::Foundation::GlobalFree;
@@ -613,6 +645,30 @@ mod win {
         }
         let mut sel = Selection::default();
         unsafe {
+            // Editors copy the whole current line when nothing is selected; they leave a marker format.
+            let mut names: Vec<String> = Vec::new();
+            let mut vscode_data: Option<String> = None;
+            let mut f = EnumClipboardFormats(0);
+            while f != 0 {
+                if f >= 0xC000 {
+                    let mut buf = [0u16; 128];
+                    let n = GetClipboardFormatNameW(f, buf.as_mut_ptr(), buf.len() as i32);
+                    if n > 0 {
+                        let name = String::from_utf16_lossy(&buf[..n as usize]);
+                        if name == "vscode-editor-data" {
+                            if let Some(bytes) = read_hglobal(GetClipboardData(f)) {
+                                vscode_data = Some(decode_marker_text(&bytes));
+                            }
+                        }
+                        names.push(name);
+                    }
+                }
+                f = EnumClipboardFormats(f);
+            }
+            if is_line_copy(&names, vscode_data.as_deref()) {
+                CloseClipboard();
+                return Selection::default();
+            }
             if IsClipboardFormatAvailable(CF_UNICODETEXT) != 0 {
                 if let Some(bytes) = read_hglobal(GetClipboardData(CF_UNICODETEXT)) {
                     let units: Vec<u16> = bytes
@@ -871,5 +927,28 @@ mod tests {
         assert_eq!(to_base64(b"Man"), "TWFu");
         assert_eq!(to_base64(b"Ma"), "TWE=");
         assert_eq!(to_base64(b"M"), "TQ==");
+    }
+
+    #[test]
+    fn line_copy_markers() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert!(is_line_copy(&s(&["MSDEVLineSelect"]), None));
+        assert!(is_line_copy(
+            &s(&["VisualStudioEditorOperationsLineCutCopyClipboardTag"]),
+            None
+        ));
+        assert!(is_line_copy(
+            &s(&["vscode-editor-data"]),
+            Some("{\"version\":1,\"isFromEmptySelection\":true}")
+        ));
+        assert!(is_line_copy(
+            &s(&["vscode-editor-data"]),
+            Some("{\"isFromEmptySelection\": true}")
+        ));
+        assert!(!is_line_copy(
+            &s(&["vscode-editor-data"]),
+            Some("{\"isFromEmptySelection\":false}")
+        ));
+        assert!(!is_line_copy(&s(&["HTML Format", "PNG"]), None));
     }
 }
