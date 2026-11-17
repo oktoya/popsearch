@@ -26,7 +26,7 @@
 
 ### WebView2 런타임 (Windows)
 
-팝써는 화면을 그리는 데 Microsoft **WebView2 런타임**을 씁니다.
+팝써치는 화면을 그리는 데 Microsoft **WebView2 런타임**을 씁니다.
 
 - **Windows 11**: 기본 포함되어 있습니다.
 - **Windows 10**: 대부분 Edge와 함께 이미 설치되어 있습니다. 다만 LTSC 판이나 Edge를 제거한 PC에는 없을 수 있습니다.
