@@ -88,7 +88,7 @@
 
 ## 데이터와 개인정보
 
-| 무엇 | 어디에 |
+| 항목 | 저장 위치 |
 |---|---|
 | 설정 | `%APPDATA%\com.popsearch.app\settings.json` |
 | 히스토리 | `%APPDATA%\com.popsearch.app\history.db` (SQLite) |
