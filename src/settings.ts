@@ -32,6 +32,7 @@ export async function loadSettings(): Promise<Settings> {
 export function initSettingsPanel(
   onChange: (s: Settings) => void,
   onClose?: () => void,
+  onCliReset?: () => void,
 ): {
   toggle: () => void;
   close: (silent?: boolean) => void;
@@ -127,7 +128,6 @@ export function initSettingsPanel(
       r.checked = r.value === current.provider;
     });
     webSearch.checked = current.web_search;
-    webSearch.disabled = current.provider !== "api";
     captureSel.checked = current.capture_selection;
     autostart.checked = current.autostart ?? true;
     modelRadios.forEach((r) => {
@@ -176,7 +176,10 @@ export function initSettingsPanel(
 
   webSearch.addEventListener("change", () => {
     current = { ...current, web_search: webSearch.checked };
-    save();
+    save()
+      .then(() => invoke("reset_cli_sessions"))
+      .then(() => onCliReset?.())
+      .catch(() => {});
   });
 
   modelRadios.forEach((r) => {

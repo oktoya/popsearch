@@ -5,6 +5,7 @@ import type { Attachment } from "./images";
 export interface ApiHandlers {
   onChunk: (text: string) => void;
   onDone: (sources?: Source[]) => void;
+  onStatus?: (text: string | null) => void;
   onError: (message: string) => void;
 }
 
@@ -163,9 +164,21 @@ export async function askApi(
       }
       stream = client.beta.messages.stream(params, { signal: controller.signal });
     }
+    let statusShown = false;
     for await (const event of stream) {
       if (generation !== myGeneration) return;
-      if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+      if (
+        event.type === "content_block_start" &&
+        event.content_block.type === "server_tool_use" &&
+        event.content_block.name === "web_search"
+      ) {
+        statusShown = true;
+        handlers.onStatus?.("🔎 웹 검색 중…");
+      } else if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+        if (statusShown) {
+          statusShown = false;
+          handlers.onStatus?.(null);
+        }
         handlers.onChunk(event.delta.text);
       }
     }

@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, Emitter};
 
-pub const SYSTEM_PROMPT: &str = "You are PopSearch, a fast answer assistant opened from a desktop search bar. Answer in the language of the user's question. Be concise and direct; lead with the answer. Use Markdown when it helps (lists, tables, code blocks). Code blocks must always state the language. If the content of a code block itself contains a line of three backticks, fence that block with four or more backticks (one more than the longest backtick run inside).";
+pub const SYSTEM_PROMPT: &str = "You are PopSearch, a fast answer assistant opened from a desktop search bar. Answer in the language of the user's question. Be concise and direct; lead with the answer. Use Markdown when it helps (lists, tables, code blocks). Code blocks must always state the language. If the content of a code block itself contains a line of three backticks, fence that block with four or more backticks (one more than the longest backtick run inside). When you use web search, include the most relevant source URLs inline as Markdown links, using only URLs that appear in your search results; never invent or guess URLs. If you did not search, do not write URLs unless you are certain they exist. When the user asks for images or videos, give direct links to the pages or videos you found (for example YouTube links) instead of only suggesting search terms.";
 
 pub const NOT_FOUND_MSG: &str =
     "Claude Code CLI를 찾을 수 없습니다. claude 명령을 설치하거나 POPSEARCH_CLAUDE_BIN을 지정하세요.";
@@ -15,6 +15,7 @@ pub const NOT_FOUND_MSG: &str =
 #[derive(Debug, PartialEq)]
 pub enum CliEvent {
     Chunk(String),
+    Status(Option<String>),
     Done,
     Error(String),
 }
@@ -83,7 +84,19 @@ pub fn parse_line(line: &str) -> Option<CliEvent> {
     match v.get("type")?.as_str()? {
         "stream_event" => {
             let ev = v.get("event")?;
-            if ev.get("type")?.as_str()? != "content_block_delta" {
+            let ev_type = ev.get("type")?.as_str()?;
+            if ev_type == "content_block_start" {
+                let block = ev.get("content_block")?;
+                if block.get("type")?.as_str()? != "tool_use" {
+                    return None;
+                }
+                return match block.get("name")?.as_str()? {
+                    "WebSearch" => Some(CliEvent::Status(Some("🔎 웹 검색 중…".to_string()))),
+                    "WebFetch" => Some(CliEvent::Status(Some("🌐 페이지 읽는 중…".to_string()))),
+                    _ => None,
+                };
+            }
+            if ev_type != "content_block_delta" {
                 return None;
             }
             let delta = ev.get("delta")?;
@@ -156,6 +169,14 @@ pub fn normalize_model(model: &str) -> &'static str {
     }
 }
 
+fn tools_args(web_search: bool) -> Vec<&'static str> {
+    if web_search {
+        vec!["--tools", "WebSearch,WebFetch", "--allowedTools", "WebSearch,WebFetch"]
+    } else {
+        vec!["--tools", ""]
+    }
+}
+
 fn effort_for(model: &str) -> &'static str {
     if model == "haiku" {
         "low"
@@ -173,17 +194,12 @@ pub struct CliSession {
 }
 
 impl CliSession {
-    pub fn spawn(app: &AppHandle, model: &str) -> Result<CliSession, String> {
+    pub fn spawn(app: &AppHandle, model: &str, web_search: bool) -> Result<CliSession, String> {
         let bin = find_claude_bin().ok_or_else(|| NOT_FOUND_MSG.to_string())?;
         let mut cmd = Command::new(bin);
+        cmd.args(["-p", "--model", model, "--effort", effort_for(model)]);
+        cmd.args(tools_args(web_search));
         cmd.args([
-            "-p",
-            "--model",
-            model,
-            "--effort",
-            effort_for(model),
-            "--tools",
-            "",
             "--strict-mcp-config",
             "--setting-sources",
             "",
@@ -233,6 +249,7 @@ impl CliSession {
             let exited = exited.clone();
             std::thread::spawn(move || {
                 let r = BufReader::new(stdout);
+                let mut status_shown = false;
                 for line in r.lines() {
                     let Ok(line) = line else { break };
                     match parse_line(&line) {
@@ -240,15 +257,31 @@ impl CliSession {
                             if killed.load(Ordering::SeqCst) {
                                 continue;
                             }
+                            if status_shown {
+                                status_shown = false;
+                                let _ = app.emit(
+                                    "popsearch://status",
+                                    serde_json::json!({ "text": serde_json::Value::Null }),
+                                );
+                            }
                             let _ = app.emit("popsearch://chunk", serde_json::json!({ "text": text }));
                         }
+                        Some(CliEvent::Status(text)) => {
+                            if killed.load(Ordering::SeqCst) {
+                                continue;
+                            }
+                            status_shown = text.is_some();
+                            let _ = app.emit("popsearch://status", serde_json::json!({ "text": text }));
+                        }
                         Some(CliEvent::Done) => {
+                            status_shown = false;
                             in_flight.store(false, Ordering::SeqCst);
                             if !killed.load(Ordering::SeqCst) {
                                 let _ = app.emit("popsearch://done", serde_json::json!({}));
                             }
                         }
                         Some(CliEvent::Error(message)) => {
+                            status_shown = false;
                             in_flight.store(false, Ordering::SeqCst);
                             if !killed.load(Ordering::SeqCst) {
                                 let _ = app.emit(
@@ -319,6 +352,10 @@ pub struct Manager {
     inner: Arc<Mutex<Sessions>>,
 }
 
+fn web_search_on(app: &AppHandle) -> bool {
+    crate::settings::get_settings(app.clone()).web_search
+}
+
 fn default_model(app: &AppHandle) -> &'static str {
     normalize_model(&crate::settings::get_settings(app.clone()).default_model)
 }
@@ -336,7 +373,7 @@ impl Manager {
         let app = app.clone();
         std::thread::spawn(move || {
             let model = default_model(&app);
-            if let Ok(s) = CliSession::spawn(&app, model) {
+            if let Ok(s) = CliSession::spawn(&app, model, web_search_on(&app)) {
                 let mut g = inner.lock().unwrap();
                 if !g.current.contains_key(model) {
                     g.current.insert(model, s);
@@ -345,7 +382,7 @@ impl Manager {
                     g.spare_model = model;
                 }
             }
-            if let Ok(s) = CliSession::spawn(&app, model) {
+            if let Ok(s) = CliSession::spawn(&app, model, web_search_on(&app)) {
                 let mut g = inner.lock().unwrap();
                 if g.spare.is_none() {
                     g.spare = Some(s);
@@ -363,7 +400,7 @@ impl Manager {
         let app = app.clone();
         std::thread::spawn(move || {
             let model = default_model(&app);
-            if let Ok(s) = CliSession::spawn(&app, model) {
+            if let Ok(s) = CliSession::spawn(&app, model, web_search_on(&app)) {
                 let mut g = inner.lock().unwrap();
                 if g.spare.is_none() {
                     g.spare = Some(s);
@@ -385,7 +422,7 @@ impl Manager {
                 if let Some(mut old) = g.current.remove(model) {
                     old.kill();
                 }
-                g.current.insert(model, CliSession::spawn(app, model)?);
+                g.current.insert(model, CliSession::spawn(app, model, web_search_on(app))?);
             }
             g.current.get_mut(model).unwrap().send(text, attachments)
         })();
@@ -410,6 +447,12 @@ impl Manager {
             }
         }
         self.spawn_spare_background(app);
+    }
+
+    /// Kill every session and spawn fresh ones (used when the web search setting changes).
+    pub fn reset_sessions(&self, app: &AppHandle) {
+        self.kill_all();
+        self.warm_up(app);
     }
 
     pub fn kill_all(&self) {
@@ -530,6 +573,37 @@ mod tests {
         assert_eq!(effort_for("haiku"), "low");
         assert_eq!(effort_for("sonnet"), "medium");
         assert_eq!(effort_for("opus"), "medium");
+    }
+
+    #[test]
+    fn tool_use_status() {
+        let l = r#"{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"t1","name":"WebSearch","input":{}}}}"#;
+        assert_eq!(
+            parse_line(l),
+            Some(CliEvent::Status(Some("🔎 웹 검색 중…".to_string())))
+        );
+        let l = r#"{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"t2","name":"WebFetch","input":{}}}}"#;
+        assert_eq!(
+            parse_line(l),
+            Some(CliEvent::Status(Some("🌐 페이지 읽는 중…".to_string())))
+        );
+    }
+
+    #[test]
+    fn other_block_start_ignored() {
+        let l = r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}"#;
+        assert_eq!(parse_line(l), None);
+        let l = r#"{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"t3","name":"Bash","input":{}}}}"#;
+        assert_eq!(parse_line(l), None);
+    }
+
+    #[test]
+    fn tools_args_modes() {
+        assert_eq!(tools_args(false), vec!["--tools", ""]);
+        assert_eq!(
+            tools_args(true),
+            vec!["--tools", "WebSearch,WebFetch", "--allowedTools", "WebSearch,WebFetch"]
+        );
     }
 
     #[test]

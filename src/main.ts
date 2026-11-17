@@ -245,6 +245,11 @@ const panel = initSettingsPanel(
     updateModelPill();
   },
   () => focusQuery(),
+  () => {
+    for (const k of Object.keys(seenCounts)) {
+      if (k !== "api") seenCounts[k] = 0;
+    }
+  },
 );
 loadSettings().then((s) => {
   settings = s;
@@ -538,7 +543,12 @@ function send(text: string, model: ModelKey) {
   input.disabled = true;
   scrollToBottom();
   if (settings.provider === "api") {
-    askApi(providerText, atts, settings.web_search, model, { onChunk, onDone, onError });
+    askApi(providerText, atts, settings.web_search, model, {
+      onChunk,
+      onDone,
+      onError,
+      onStatus: showStatus,
+    });
   } else {
     invoke("ask", {
       text: providerText,
@@ -618,6 +628,24 @@ listen<{
   }
 });
 
+let statusEl: HTMLElement | null = null;
+
+// Muted "searching" line right below the current answer; never part of the answer.
+function showStatus(text: string | null) {
+  if (text === null || !currentAnswer) {
+    statusEl?.remove();
+    statusEl = null;
+    return;
+  }
+  if (!statusEl) {
+    statusEl = document.createElement("div");
+    statusEl.className = "answer-status";
+  }
+  statusEl.textContent = text;
+  if (statusEl.previousElementSibling !== currentAnswer) currentAnswer.after(statusEl);
+  scrollToBottom();
+}
+
 function onChunk(text: string) {
   if (!currentAnswer) return;
   currentRaw += text;
@@ -625,6 +653,7 @@ function onChunk(text: string) {
 }
 
 async function onDone(sources: Source[] = []) {
+  showStatus(null);
   cancelPendingRender();
   if (currentAnswer) {
     renderCurrent();
@@ -664,6 +693,7 @@ async function onDone(sources: Source[] = []) {
 }
 
 function onError(message: string) {
+  showStatus(null);
   cancelPendingRender();
   pendingSave = null;
   if (currentAnswer) {
@@ -675,6 +705,7 @@ function onError(message: string) {
 }
 
 listen<{ text: string }>("popsearch://chunk", (e) => onChunk(e.payload.text));
+listen<{ text: string | null }>("popsearch://status", (e) => showStatus(e.payload.text));
 listen("popsearch://done", () => onDone());
 listen<{ message: string }>("popsearch://error", (e) => onError(e.payload.message));
 
@@ -721,6 +752,7 @@ results.addEventListener("click", onResultsClick);
 document.getElementById("history-view-body")!.addEventListener("click", onResultsClick);
 
 async function resetAll() {
+  showStatus(null);
   cancelPendingRender();
   convEpoch++;
   conversationId = null;

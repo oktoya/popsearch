@@ -115,6 +115,11 @@ fn new_conversation(app: AppHandle, manager: tauri::State<provider_cli::Manager>
 }
 
 #[tauri::command]
+fn reset_cli_sessions(app: AppHandle, manager: tauri::State<provider_cli::Manager>) {
+    manager.reset_sessions(&app);
+}
+
+#[tauri::command]
 fn get_system_prompt() -> &'static str {
     provider_cli::SYSTEM_PROMPT
 }
@@ -185,6 +190,7 @@ pub fn run() {
             ask,
             extract_office,
             new_conversation,
+            reset_cli_sessions,
             get_system_prompt,
             get_hotkey_error,
             set_hotkey,
