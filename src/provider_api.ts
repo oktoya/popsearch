@@ -4,8 +4,13 @@ import type { Attachment } from "./images";
 
 export interface ApiHandlers {
   onChunk: (text: string) => void;
-  onDone: () => void;
+  onDone: (sources?: Source[]) => void;
   onError: (message: string) => void;
+}
+
+export interface Source {
+  url: string;
+  title: string;
 }
 
 export type ModelKey = "haiku" | "sonnet" | "opus";
@@ -47,6 +52,33 @@ function errorMessage(error: unknown): string {
   }
   const message = error instanceof Error ? error.message : String(error);
   return `API 오류: ${message}`;
+}
+
+// Sources from the final message: web_search_result_location citations on text
+// blocks first; otherwise the first results of web_search_tool_result blocks.
+function collectSources(blocks: Anthropic.Beta.BetaContentBlock[]): Source[] {
+  const MAX = 8;
+  const out: Source[] = [];
+  const seen = new Set<string>();
+  for (const b of blocks) {
+    if (b.type !== "text" || !b.citations) continue;
+    for (const c of b.citations) {
+      if (c.type !== "web_search_result_location" || seen.has(c.url)) continue;
+      seen.add(c.url);
+      out.push({ url: c.url, title: c.title ?? "" });
+    }
+  }
+  if (out.length === 0) {
+    for (const b of blocks) {
+      if (b.type !== "web_search_tool_result" || !Array.isArray(b.content)) continue;
+      for (const r of b.content.slice(0, 5)) {
+        if (seen.has(r.url)) continue;
+        seen.add(r.url);
+        out.push({ url: r.url, title: r.title });
+      }
+    }
+  }
+  return out.slice(0, MAX);
 }
 
 export async function askApi(
@@ -157,7 +189,9 @@ export async function askApi(
     } else if (finalMessage.stop_reason === "pause_turn") {
       handlers.onChunk("\n\n(검색이 길어져 중단되었습니다)");
     }
-    handlers.onDone();
+    handlers.onDone(
+      collectSources(finalMessage.content as unknown as Anthropic.Beta.BetaContentBlock[]),
+    );
   } catch (error) {
     if (generation !== myGeneration) return;
     handlers.onError(errorMessage(error));

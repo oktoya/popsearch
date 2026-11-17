@@ -1,5 +1,5 @@
 use rusqlite::{params, Connection};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
@@ -15,12 +15,19 @@ pub struct ConversationSummary {
     pub updated_at: i64,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct Source {
+    pub url: String,
+    pub title: String,
+}
+
 #[derive(Serialize, Debug)]
 pub struct HistoryMessage {
     pub question: String,
     pub images: Vec<String>,
     pub answer: String,
     pub model: String,
+    pub sources: Vec<Source>,
 }
 
 #[derive(Serialize, Debug)]
@@ -50,26 +57,34 @@ CREATE TABLE IF NOT EXISTS messages(
     images TEXT NOT NULL,
     answer TEXT NOT NULL,
     created_at INTEGER NOT NULL,
-    model TEXT NOT NULL DEFAULT 'haiku'
+    model TEXT NOT NULL DEFAULT 'haiku',
+    sources TEXT NOT NULL DEFAULT '[]'
 );
 ";
 
 fn init(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     conn.execute_batch(SCHEMA)?;
-    let has_model = {
+    let (has_model, has_sources) = {
         let mut stmt = conn.prepare("PRAGMA table_info(messages)")?;
         let names = stmt.query_map([], |r| r.get::<_, String>(1))?;
-        let mut found = false;
+        let mut model = false;
+        let mut sources = false;
         for n in names {
-            if n? == "model" {
-                found = true;
+            let n = n?;
+            if n == "model" {
+                model = true;
+            } else if n == "sources" {
+                sources = true;
             }
         }
-        found
+        (model, sources)
     };
     if !has_model {
         conn.execute_batch("ALTER TABLE messages ADD COLUMN model TEXT NOT NULL DEFAULT 'haiku';")?;
+    }
+    if !has_sources {
+        conn.execute_batch("ALTER TABLE messages ADD COLUMN sources TEXT NOT NULL DEFAULT '[]';")?;
     }
     Ok(())
 }
@@ -117,6 +132,7 @@ fn add(
     question: &str,
     images: &[String],
     answer: &str,
+    sources: &[Source],
 ) -> rusqlite::Result<i64> {
     let now = now_ms();
     let cid = match conversation_id {
@@ -135,9 +151,10 @@ fn add(
         |r| r.get(0),
     )?;
     let images_json = serde_json::to_string(images).unwrap_or_else(|_| "[]".to_string());
+    let sources_json = serde_json::to_string(sources).unwrap_or_else(|_| "[]".to_string());
     conn.execute(
-        "INSERT INTO messages(conversation_id, seq, question, images, answer, created_at, model) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![cid, seq, question, images_json, answer, now, model],
+        "INSERT INTO messages(conversation_id, seq, question, images, answer, created_at, model, sources) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![cid, seq, question, images_json, answer, now, model, sources_json],
     )?;
     conn.execute(
         "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
@@ -190,16 +207,18 @@ fn get(conn: &Connection, id: i64) -> rusqlite::Result<ConversationDetail> {
         },
     )?;
     let mut stmt = conn.prepare(
-        "SELECT question, images, answer, model FROM messages WHERE conversation_id = ?1 ORDER BY seq",
+        "SELECT question, images, answer, model, sources FROM messages WHERE conversation_id = ?1 ORDER BY seq",
     )?;
     let messages = stmt
         .query_map(params![id], |r| {
             let images: String = r.get(1)?;
+            let sources: String = r.get(4)?;
             Ok(HistoryMessage {
                 question: r.get(0)?,
                 images: serde_json::from_str(&images).unwrap_or_default(),
                 answer: r.get(2)?,
                 model: r.get(3)?,
+                sources: serde_json::from_str(&sources).unwrap_or_default(),
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -227,10 +246,20 @@ pub fn history_add(
     question: String,
     images: Vec<String>,
     answer: String,
+    sources: Option<Vec<Source>>,
 ) -> Result<i64, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    add(&conn, conversation_id, &provider, &model, &question, &images, &answer)
-        .map_err(|e| e.to_string())
+    add(
+        &conn,
+        conversation_id,
+        &provider,
+        &model,
+        &question,
+        &images,
+        &answer,
+        &sources.unwrap_or_default(),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -273,23 +302,23 @@ mod tests {
     #[test]
     fn add_new_and_append() {
         let conn = mem();
-        let id = add(&conn, None, "cli", "haiku", "첫 질문\n둘째 줄", &["data:x".to_string()], "답1").unwrap();
-        let id2 = add(&conn, Some(id), "cli", "haiku", "후속", &[], "답2").unwrap();
+        let id = add(&conn, None, "cli", "haiku", "첫 질문\n둘째 줄", &["data:x".to_string()], "답1", &[]).unwrap();
+        let id2 = add(&conn, Some(id), "cli", "haiku", "후속", &[], "답2", &[]).unwrap();
         assert_eq!(id, id2);
         let c = get(&conn, id).unwrap();
         assert_eq!(c.title, "첫 질문");
         assert_eq!(c.messages.len(), 2);
         assert_eq!(c.messages[0].images, vec!["data:x".to_string()]);
         assert_eq!(c.messages[1].question, "후속");
-        let empty = add(&conn, None, "api", "haiku", "  ", &[], "a").unwrap();
+        let empty = add(&conn, None, "api", "haiku", "  ", &[], "a", &[]).unwrap();
         assert_eq!(get(&conn, empty).unwrap().title, "(이미지)");
     }
 
     #[test]
     fn model_round_trip() {
         let conn = mem();
-        let id = add(&conn, None, "cli", "haiku", "q1", &[], "a1").unwrap();
-        add(&conn, Some(id), "cli", "opus", "q2", &[], "a2").unwrap();
+        let id = add(&conn, None, "cli", "haiku", "q1", &[], "a1", &[]).unwrap();
+        add(&conn, Some(id), "cli", "opus", "q2", &[], "a2", &[]).unwrap();
         let c = get(&conn, id).unwrap();
         assert_eq!(c.model, "haiku");
         assert_eq!(c.messages[0].model, "haiku");
@@ -316,15 +345,15 @@ mod tests {
         init(&conn).unwrap();
         let c = get(&conn, 1).unwrap();
         assert_eq!(c.messages[0].model, "haiku");
-        add(&conn, Some(1), "cli", "sonnet", "new q", &[], "new a").unwrap();
+        add(&conn, Some(1), "cli", "sonnet", "new q", &[], "new a", &[]).unwrap();
         assert_eq!(get(&conn, 1).unwrap().messages[1].model, "sonnet");
     }
 
     #[test]
     fn list_with_and_without_query() {
         let conn = mem();
-        add(&conn, None, "cli", "haiku", "검색창 만들기", &[], "네").unwrap();
-        add(&conn, None, "cli", "haiku", "날씨", &[], "맑음").unwrap();
+        add(&conn, None, "cli", "haiku", "검색창 만들기", &[], "네", &[]).unwrap();
+        add(&conn, None, "cli", "haiku", "날씨", &[], "맑음", &[]).unwrap();
         assert_eq!(list(&conn, "", 100).unwrap().len(), 2);
         let r = list(&conn, "검색", 100).unwrap();
         assert_eq!(r.len(), 1);
@@ -337,8 +366,8 @@ mod tests {
     #[test]
     fn like_escaping() {
         let conn = mem();
-        add(&conn, None, "cli", "haiku", "100% 확실", &[], "a").unwrap();
-        add(&conn, None, "cli", "haiku", "abc", &[], "b").unwrap();
+        add(&conn, None, "cli", "haiku", "100% 확실", &[], "a", &[]).unwrap();
+        add(&conn, None, "cli", "haiku", "abc", &[], "b", &[]).unwrap();
         assert_eq!(list(&conn, "%", 100).unwrap().len(), 1);
         assert_eq!(list(&conn, "_", 100).unwrap().len(), 0);
     }
@@ -346,12 +375,48 @@ mod tests {
     #[test]
     fn delete_cascades() {
         let conn = mem();
-        let id = add(&conn, None, "cli", "haiku", "q", &[], "a").unwrap();
+        let id = add(&conn, None, "cli", "haiku", "q", &[], "a", &[]).unwrap();
         delete(&conn, id).unwrap();
         let n: i64 = conn
             .query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 0);
         assert!(list(&conn, "", 100).unwrap().is_empty());
+    }
+
+    #[test]
+    fn sources_round_trip() {
+        let conn = mem();
+        let src = vec![Source { url: "https://a.com/x".into(), title: "A".into() }];
+        let id = add(&conn, None, "api", "haiku", "q1", &[], "a1", &src).unwrap();
+        add(&conn, Some(id), "api", "haiku", "q2", &[], "a2", &[]).unwrap();
+        let c = get(&conn, id).unwrap();
+        assert_eq!(c.messages[0].sources, src);
+        assert!(c.messages[1].sources.is_empty());
+    }
+
+    #[test]
+    fn migrates_sources_column() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE conversations(
+                id INTEGER PRIMARY KEY, title TEXT NOT NULL, provider TEXT NOT NULL,
+                model TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+             CREATE TABLE messages(
+                id INTEGER PRIMARY KEY,
+                conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                seq INTEGER NOT NULL, question TEXT NOT NULL, images TEXT NOT NULL,
+                answer TEXT NOT NULL, created_at INTEGER NOT NULL,
+                model TEXT NOT NULL DEFAULT 'haiku');
+             INSERT INTO conversations VALUES (1, 't', 'api', 'haiku', 1, 1);
+             INSERT INTO messages VALUES (1, 1, 1, 'q', '[]', 'a', 1, 'haiku');",
+        )
+        .unwrap();
+        init(&conn).unwrap();
+        init(&conn).unwrap();
+        assert!(get(&conn, 1).unwrap().messages[0].sources.is_empty());
+        let src = vec![Source { url: "https://b.com".into(), title: "B".into() }];
+        add(&conn, Some(1), "api", "haiku", "q2", &[], "a2", &src).unwrap();
+        assert_eq!(get(&conn, 1).unwrap().messages[1].sources, src);
     }
 }

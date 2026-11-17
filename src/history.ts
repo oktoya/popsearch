@@ -1,11 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { saveConversationMarkdown } from "./export";
+import type { Source } from "./provider_api";
 
 export interface HistoryMessage {
   question: string;
   images: string[];
   answer: string;
   model: string;
+  sources: Source[];
 }
 
 export interface ConversationDetail {

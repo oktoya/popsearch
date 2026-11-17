@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { renderMarkdown } from "./render";
 import { copyAnswer, copyBlock, copyCodeBlock, flashCopied } from "./copy";
-import { askApi, resetConversation, type ModelKey } from "./provider_api";
+import { askApi, resetConversation, type ModelKey, type Source } from "./provider_api";
 import { fileToAttachment, rawImageToAttachment, MAX_ATTACHMENTS, type Attachment } from "./images";
 import { initSettingsPanel, loadSettings, capturingHotkey, type Settings } from "./settings";
 import { normalizeFences } from "./export";
@@ -297,6 +297,8 @@ function renderMessages(body: HTMLElement, conv: ConversationDetail) {
     body.appendChild(buildQuestion(m.question, m.images, m.model));
     body.appendChild(a);
     addCopyButtons(a);
+    addPreviews(a);
+    addSources(a, m.sources ?? []);
   });
 }
 
@@ -366,6 +368,131 @@ function addCopyButtons(answer: HTMLDivElement) {
   all.textContent = "전체 복사";
   actions.appendChild(all);
   answer.after(actions);
+}
+
+type LinkKind = { kind: "youtube"; id: string } | { kind: "image" } | null;
+
+function classifyLink(href: string): LinkKind {
+  let u: URL;
+  try {
+    u = new URL(href);
+  } catch (_) {
+    return null;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+  const host = u.hostname.toLowerCase().replace(/^(www|m)\./, "");
+  const idOk = (s: string | null | undefined) => (s && /^[A-Za-z0-9_-]{6,20}$/.test(s) ? s : null);
+  if (host === "youtube.com") {
+    if (u.pathname === "/watch") {
+      const id = idOk(u.searchParams.get("v"));
+      if (id) return { kind: "youtube", id };
+    }
+    const m = u.pathname.match(/^\/shorts\/([^/]+)/);
+    const id = idOk(m && m[1]);
+    if (id) return { kind: "youtube", id };
+  } else if (host === "youtu.be") {
+    const id = idOk(u.pathname.slice(1).split("/")[0]);
+    if (id) return { kind: "youtube", id };
+  }
+  if (/\.(png|jpe?g|gif|webp)$/i.test(u.pathname)) return { kind: "image" };
+  return null;
+}
+
+// Previews for links in a finished answer. Placed right after the answer element
+// (before its answer-actions); never part of the copied answer.
+function addPreviews(answer: HTMLElement) {
+  const inline = new Set<string>();
+  answer.querySelectorAll("img").forEach((img) => {
+    img.loading = "lazy";
+    img.addEventListener("error", () => img.remove());
+    inline.add(img.src);
+  });
+  const seen = new Set<string>();
+  const cards: HTMLElement[] = [];
+  let yt = 0;
+  let imgs = 0;
+  answer.querySelectorAll("a").forEach((a) => {
+    const href = a.href;
+    if (!href || seen.has(href)) return;
+    const c = classifyLink(href);
+    if (!c) return;
+    const label = (a.textContent || "").trim();
+    if (c.kind === "youtube") {
+      if (yt >= 3) return;
+      seen.add(href);
+      yt++;
+      const card = document.createElement("div");
+      card.className = "preview-card preview-yt";
+      card.dataset.url = href;
+      const wrap = document.createElement("div");
+      wrap.className = "preview-thumb";
+      const img = document.createElement("img");
+      img.src = `https://i.ytimg.com/vi/${c.id}/hqdefault.jpg`;
+      img.loading = "lazy";
+      img.addEventListener("error", () => card.remove());
+      const play = document.createElement("span");
+      play.className = "preview-play";
+      play.textContent = "▶";
+      wrap.appendChild(img);
+      wrap.appendChild(play);
+      const cap = document.createElement("div");
+      cap.className = "preview-caption";
+      cap.textContent = label && label !== href ? label : href;
+      card.appendChild(wrap);
+      card.appendChild(cap);
+      cards.push(card);
+    } else {
+      if (imgs >= 4 || inline.has(href)) return;
+      seen.add(href);
+      imgs++;
+      const card = document.createElement("div");
+      card.className = "preview-card preview-img";
+      card.dataset.url = href;
+      const img = document.createElement("img");
+      img.src = href;
+      img.loading = "lazy";
+      img.addEventListener("error", () => card.remove());
+      card.appendChild(img);
+      cards.push(card);
+    }
+  });
+  if (cards.length === 0) return;
+  const strip = document.createElement("div");
+  strip.className = "preview-strip";
+  cards.forEach((c) => strip.appendChild(c));
+  answer.after(strip);
+}
+
+function sourceDomain(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch (_) {
+    return url;
+  }
+}
+
+// Sources block: placed before the answer's answer-actions (after any preview
+// strip); never part of the copied answer.
+function addSources(answer: HTMLElement, sources: Source[]) {
+  if (sources.length === 0) return;
+  const box = document.createElement("div");
+  box.className = "sources";
+  const head = document.createElement("div");
+  head.className = "sources-title";
+  head.textContent = "출처";
+  box.appendChild(head);
+  sources.forEach((s, i) => {
+    const row = document.createElement("div");
+    row.className = "source-item";
+    row.dataset.url = s.url;
+    const domain = sourceDomain(s.url);
+    row.textContent = `${i + 1}. ${s.title && s.title.trim() !== "" ? s.title : domain} — ${domain}`;
+    box.appendChild(row);
+  });
+  let n = answer.nextElementSibling;
+  while (n && !n.classList.contains("answer-actions")) n = n.nextElementSibling;
+  if (n) n.before(box);
+  else answer.after(box);
 }
 
 function scrollToBottom() {
@@ -497,11 +624,13 @@ function onChunk(text: string) {
   scheduleRender();
 }
 
-async function onDone() {
+async function onDone(sources: Source[] = []) {
   cancelPendingRender();
   if (currentAnswer) {
     renderCurrent();
     addCopyButtons(currentAnswer);
+    addPreviews(currentAnswer);
+    addSources(currentAnswer, sources);
     scrollToBottom();
   }
   const save = pendingSave;
@@ -524,6 +653,7 @@ async function onDone() {
         question: save.text + save.fileNames.map((n) => `\n(첨부: ${n})`).join(""),
         images: save.thumbs,
         answer: currentRaw,
+        sources,
       });
       if (epoch === convEpoch) conversationId = id;
     } catch (_) {
@@ -556,11 +686,19 @@ async function onResultsClick(e: MouseEvent) {
     openUrl(link.href);
     return;
   }
+  const card = target.closest(".preview-card, .source-item") as HTMLElement | null;
+  if (card && card.dataset.url) {
+    openUrl(card.dataset.url);
+    return;
+  }
   const btn = target.closest("button") as HTMLButtonElement | null;
   if (!btn) return;
   try {
     if (btn.classList.contains("copy-all")) {
-      const answer = btn.parentElement?.previousElementSibling as HTMLElement | null;
+      let answer = btn.parentElement?.previousElementSibling as HTMLElement | null;
+      while (answer && !answer.classList.contains("answer")) {
+        answer = answer.previousElementSibling as HTMLElement | null;
+      }
       if (!answer) return;
       await copyAnswer(answer);
       flashCopied(btn, "전체 복사");

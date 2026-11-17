@@ -44,6 +44,10 @@ export function conversationToMarkdown(conv: ConversationDetail): string {
     for (const img of m.images) parts.push(`![image](${img})`);
     parts.push("## 답변");
     parts.push(normalizeFences(m.answer));
+    if (m.sources && m.sources.length > 0) {
+      parts.push("### 출처");
+      parts.push(m.sources.map((s) => `- [${s.title || s.url}](${s.url})`).join("\n"));
+    }
   }
   return parts.join("\n\n") + "\n";
 }
