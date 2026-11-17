@@ -156,17 +156,42 @@ function defaultModel(): ModelKey {
   return m === "sonnet" || m === "opus" ? m : "haiku";
 }
 
+const CODE_KEYS: Record<string, ModelKey> = {
+  KeyH: "haiku",
+  KeyS: "sonnet",
+  KeyO: "opus",
+};
+
+// Pure decision part: which model a leading "/x " prefix selects, or null.
+function decidePrefix(
+  text: string,
+  hasImages: boolean,
+  prefixCode: string | null,
+): { model: ModelKey; text: string } | null {
+  if (text.length < 2 || text[0] !== "/") return null;
+  let rest: string | null = null;
+  if (text.length >= 3 && text[2] === " ") rest = text.slice(3);
+  else if (hasImages && text.length === 2) rest = "";
+  if (rest === null) return null;
+  const ch = text[1].toLowerCase();
+  const latin = ch === "h" || ch === "s" || ch === "o" ? PREFIX_KEYS[ch] : undefined;
+  const model =
+    latin ??
+    (prefixCode ? CODE_KEYS[prefixCode] : undefined) ??
+    PREFIX_KEYS[ch];
+  if (!model) return null;
+  return { model, text: rest };
+}
+
+// Physical key used for the prefix letter (works on any keyboard layout).
+let prefixCode: string | null = null;
+
 function parseModel(
   text: string,
   hasImages: boolean,
 ): { model: ModelKey; text: string; prefixed: boolean } {
-  if (text.length >= 2 && text[0] === "/") {
-    const model = PREFIX_KEYS[text[1].toLowerCase()];
-    if (model) {
-      if (text.length >= 3 && text[2] === " ") return { model, text: text.slice(3), prefixed: true };
-      if (hasImages && text.length === 2) return { model, text: "", prefixed: true };
-    }
-  }
+  const d = decidePrefix(text, hasImages, prefixCode);
+  if (d) return { model: d.model, text: d.text, prefixed: true };
   return { model: defaultModel(), text, prefixed: false };
 }
 
@@ -368,6 +393,7 @@ function send(text: string, model: ModelKey) {
   currentAnswer = a;
   currentRaw = "";
   input.value = "";
+  prefixCode = null;
   autoGrow();
   input.disabled = true;
   scrollToBottom();
@@ -396,7 +422,16 @@ function autoGrow() {
   input.style.height = Math.min(input.scrollHeight + pad, maxH) + "px";
   updateModelPill();
 }
-input.addEventListener("input", autoGrow);
+input.addEventListener("input", () => {
+  if (input.value.length < 2 || input.value[0] !== "/") prefixCode = null;
+  autoGrow();
+});
+input.addEventListener("keydown", (e) => {
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
+  if (input.value === "/" && input.selectionStart === 1 && input.selectionEnd === 1) {
+    prefixCode = e.code;
+  }
+});
 
 listen<{ media_type: string; data: string }>("popsearch://selection-image", (e) => {
   if (attachments.length >= MAX_ATTACHMENTS) return;
@@ -434,6 +469,7 @@ listen<{
   }
   if (typeof sel === "string" && sel.trim() !== "") {
     input.value = sel;
+    prefixCode = null;
     input.setSelectionRange(sel.length, sel.length);
     autoGrow();
     input.scrollTop = input.scrollHeight;
@@ -545,6 +581,7 @@ async function resetAll() {
   results.textContent = "";
   currentAnswer = null;
   input.value = "";
+  prefixCode = null;
   autoGrow();
   clearAttachments();
   enableInput(false);
