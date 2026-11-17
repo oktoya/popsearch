@@ -96,10 +96,9 @@ pub fn apply_autostart(app: &AppHandle, enabled: bool) {
     }
     use tauri_plugin_autostart::ManagerExt;
     let manager = app.autolaunch();
-    let current = manager.is_enabled().unwrap_or(false);
-    if enabled && !current {
+    if enabled {
         let _ = manager.enable();
-    } else if !enabled && current {
+    } else if manager.is_enabled().unwrap_or(false) {
         let _ = manager.disable();
     }
 }

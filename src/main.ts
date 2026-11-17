@@ -426,7 +426,12 @@ listen<{
       })
       .catch(() => {});
   }
-  input.focus();
+  const hasSel = typeof sel === "string" && sel.trim() !== "";
+  if (historyPanel.isListOpen() && !panel.isOpen() && !hasSel) {
+    historyPanel.focusSearch();
+  } else {
+    input.focus();
+  }
   if (typeof sel === "string" && sel.trim() !== "") {
     input.value = sel;
     input.setSelectionRange(sel.length, sel.length);
@@ -591,6 +596,19 @@ input.addEventListener("keydown", (e) => {
 
 window.addEventListener("keydown", async (e) => {
   if (capturingHotkey) return;
+  if (
+    historyPanel.isListOpen() &&
+    !panel.isOpen() &&
+    !e.ctrlKey &&
+    !e.altKey &&
+    !e.metaKey &&
+    (e.key.length === 1 || e.key === "Backspace")
+  ) {
+    const ae = document.activeElement;
+    if (!ae || (ae.tagName !== "INPUT" && ae.tagName !== "TEXTAREA")) {
+      historyPanel.focusSearch();
+    }
+  }
   if (e.key === "F5") {
     e.preventDefault();
     if (panel.isOpen()) {

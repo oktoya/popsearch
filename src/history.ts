@@ -31,6 +31,8 @@ export interface HistoryPanel {
   isOpen: () => boolean;
   isViewing: () => boolean;
   viewing: () => ConversationDetail | null;
+  isListOpen: () => boolean;
+  focusSearch: () => void;
 }
 
 export function initHistoryPanel(opts: {
@@ -90,6 +92,7 @@ export function initHistoryPanel(opts: {
           // ignore; list is refreshed below
         }
         await refreshList();
+        search.focus();
       });
       row.appendChild(title);
       row.appendChild(meta);
@@ -179,5 +182,7 @@ export function initHistoryPanel(opts: {
     isOpen,
     isViewing: () => !view.hidden,
     viewing: () => viewing,
+    isListOpen: () => !panel.hidden,
+    focusSearch: () => search.focus(),
   };
 }

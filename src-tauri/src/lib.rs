@@ -235,6 +235,7 @@ pub fn run() {
             let menu = Menu::with_items(app, &[&open, &quit])?;
 
             let mut tray = TrayIconBuilder::new()
+                .tooltip("팝써치")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
