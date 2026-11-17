@@ -31,9 +31,10 @@ export async function loadSettings(): Promise<Settings> {
 
 export function initSettingsPanel(
   onChange: (s: Settings) => void,
+  onClose?: () => void,
 ): {
   toggle: () => void;
-  close: () => void;
+  close: (silent?: boolean) => void;
   isOpen: () => boolean;
   open: () => Promise<void>;
   showHotkeyMessage: (msg: string) => void;
@@ -157,10 +158,11 @@ export function initSettingsPanel(
     results.hidden = true;
   }
 
-  function close() {
+  function close(silent = false) {
     if (capturingHotkey) stopCapture();
     panel.hidden = true;
     results.hidden = false;
+    if (!silent) onClose?.();
   }
 
   radios.forEach((r) => {

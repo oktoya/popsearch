@@ -27,7 +27,7 @@ interface ConversationSummary {
 
 export interface HistoryPanel {
   toggle: () => void;
-  close: () => void;
+  close: (silent?: boolean) => void;
   isOpen: () => boolean;
   isViewing: () => boolean;
   viewing: () => ConversationDetail | null;
@@ -38,6 +38,7 @@ export interface HistoryPanel {
 export function initHistoryPanel(opts: {
   renderConversation: (body: HTMLElement, conv: ConversationDetail) => void;
   onOpen: () => void;
+  onClose?: () => void;
   onViewChange?: (conv: ConversationDetail | null) => void;
   onDeleted?: (id: number) => void;
 }): HistoryPanel {
@@ -131,13 +132,14 @@ export function initHistoryPanel(opts: {
     await showList();
   }
 
-  function close() {
+  function close(silent = false) {
     viewing = null;
     opts.onViewChange?.(null);
     panel.hidden = true;
     view.hidden = true;
     viewBody.textContent = "";
     results.hidden = false;
+    if (!silent) opts.onClose?.();
   }
 
   function isOpen() {

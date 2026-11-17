@@ -230,10 +230,22 @@ function buildProviderText(text: string, ctxKey: string): string {
   );
 }
 
-const panel = initSettingsPanel((s) => {
-  settings = s;
-  updateModelPill();
-});
+// Live (question) screen is visible again: put the caret in the question input.
+function focusQuery() {
+  if (historyPanel.isOpen() || panel.isOpen()) return;
+  input.focus();
+  const n = input.value.length;
+  input.setSelectionRange(n, n);
+  autoGrow();
+}
+
+const panel = initSettingsPanel(
+  (s) => {
+    settings = s;
+    updateModelPill();
+  },
+  () => focusQuery(),
+);
 loadSettings().then((s) => {
   settings = s;
   updateModelPill();
@@ -290,7 +302,8 @@ function renderMessages(body: HTMLElement, conv: ConversationDetail) {
 
 const historyPanel = initHistoryPanel({
   renderConversation: renderMessages,
-  onOpen: () => panel.close(),
+  onOpen: () => panel.close(true),
+  onClose: () => focusQuery(),
   onViewChange: (conv) => {
     if (!conv) {
       input.placeholder = DEFAULT_PLACEHOLDER;
@@ -304,12 +317,12 @@ const historyPanel = initHistoryPanel({
   },
 });
 document.getElementById("settings-btn")!.addEventListener("click", () => {
-  historyPanel.close();
+  historyPanel.close(true);
 });
 
 invoke<string | null>("get_hotkey_error").then(async (err) => {
   if (!err) return;
-  historyPanel.close();
+  historyPanel.close(true);
   await panel.open();
   const stored = await loadSettings();
   panel.showHotkeyMessage(
@@ -367,7 +380,7 @@ function enableInput(focus: boolean) {
 function send(text: string, model: ModelKey) {
   const atts = attachments;
   clearAttachments();
-  historyPanel.close();
+  historyPanel.close(true);
   const thumbs: string[] = [];
   const fileNames: string[] = [];
   for (const a of atts) {
@@ -605,6 +618,7 @@ async function continueFrom(conv: ConversationDetail) {
   currentAnswer = null;
   renderMessages(results, conv);
   conversationId = conv.id;
+  focusQuery();
 }
 
 input.addEventListener("keydown", (e) => {
@@ -618,7 +632,7 @@ input.addEventListener("keydown", (e) => {
   if (historyPanel.isViewing()) {
     const conv = historyPanel.viewing();
     if (!conv) return;
-    historyPanel.close();
+    historyPanel.close(true);
     const keepAttachments = attachments;
     input.disabled = true;
     continueFrom(conv).then(() => {
@@ -646,12 +660,25 @@ window.addEventListener("keydown", async (e) => {
       historyPanel.focusSearch();
     }
   }
+  if (
+    !historyPanel.isOpen() &&
+    !panel.isOpen() &&
+    !e.ctrlKey &&
+    !e.altKey &&
+    !e.metaKey &&
+    (e.key.length === 1 || e.key === "Backspace")
+  ) {
+    const ae = document.activeElement;
+    if (!ae || (ae.tagName !== "INPUT" && ae.tagName !== "TEXTAREA")) {
+      input.focus();
+    }
+  }
   if (e.key === "F5") {
     e.preventDefault();
     if (panel.isOpen()) {
       panel.close();
     } else {
-      historyPanel.close();
+      historyPanel.close(true);
       panel.toggle();
     }
     return;
