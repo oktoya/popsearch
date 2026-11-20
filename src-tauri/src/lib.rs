@@ -98,9 +98,10 @@ fn ask(
     manager: tauri::State<provider_cli::Manager>,
     text: String,
     model: String,
+    web_search: bool,
     attachments: Vec<provider_cli::AttachmentInput>,
 ) {
-    manager.ask(&app, &model, &text, &attachments);
+    manager.ask(&app, &model, web_search, &text, &attachments);
 }
 
 #[tauri::command]

@@ -343,9 +343,10 @@ impl CliSession {
 
 #[derive(Default)]
 struct Sessions {
-    current: HashMap<&'static str, CliSession>,
+    current: HashMap<(&'static str, bool), CliSession>,
     spare: Option<CliSession>,
     spare_model: &'static str,
+    spare_web: bool,
 }
 
 pub struct Manager {
@@ -373,20 +374,23 @@ impl Manager {
         let app = app.clone();
         std::thread::spawn(move || {
             let model = default_model(&app);
-            if let Ok(s) = CliSession::spawn(&app, model, web_search_on(&app)) {
+            let web = web_search_on(&app);
+            if let Ok(s) = CliSession::spawn(&app, model, web) {
                 let mut g = inner.lock().unwrap();
-                if !g.current.contains_key(model) {
-                    g.current.insert(model, s);
+                if !g.current.contains_key(&(model, web)) {
+                    g.current.insert((model, web), s);
                 } else {
                     g.spare = Some(s);
                     g.spare_model = model;
+                    g.spare_web = web;
                 }
             }
-            if let Ok(s) = CliSession::spawn(&app, model, web_search_on(&app)) {
+            if let Ok(s) = CliSession::spawn(&app, model, web) {
                 let mut g = inner.lock().unwrap();
                 if g.spare.is_none() {
                     g.spare = Some(s);
                     g.spare_model = model;
+                    g.spare_web = web;
                 } else {
                     let mut s = s;
                     s.kill();
@@ -400,11 +404,13 @@ impl Manager {
         let app = app.clone();
         std::thread::spawn(move || {
             let model = default_model(&app);
-            if let Ok(s) = CliSession::spawn(&app, model, web_search_on(&app)) {
+            let web = web_search_on(&app);
+            if let Ok(s) = CliSession::spawn(&app, model, web) {
                 let mut g = inner.lock().unwrap();
                 if g.spare.is_none() {
                     g.spare = Some(s);
                     g.spare_model = model;
+                    g.spare_web = web;
                 } else {
                     let mut s = s;
                     s.kill();
@@ -413,18 +419,26 @@ impl Manager {
         });
     }
 
-    pub fn ask(&self, app: &AppHandle, model: &str, text: &str, attachments: &[AttachmentInput]) {
+    pub fn ask(
+        &self,
+        app: &AppHandle,
+        model: &str,
+        web: bool,
+        text: &str,
+        attachments: &[AttachmentInput],
+    ) {
         let model = normalize_model(model);
+        let key = (model, web);
         let result = (|| -> Result<(), String> {
             let mut g = self.inner.lock().unwrap();
-            let alive = g.current.get_mut(model).map(|s| s.is_alive()).unwrap_or(false);
+            let alive = g.current.get_mut(&key).map(|s| s.is_alive()).unwrap_or(false);
             if !alive {
-                if let Some(mut old) = g.current.remove(model) {
+                if let Some(mut old) = g.current.remove(&key) {
                     old.kill();
                 }
-                g.current.insert(model, CliSession::spawn(app, model, web_search_on(app))?);
+                g.current.insert(key, CliSession::spawn(app, model, web)?);
             }
-            g.current.get_mut(model).unwrap().send(text, attachments)
+            g.current.get_mut(&key).unwrap().send(text, attachments)
         })();
         if let Err(message) = result {
             let _ = app.emit("popsearch://error", serde_json::json!({ "message": message }));
@@ -439,8 +453,9 @@ impl Manager {
             }
             let model = default_model(app);
             if let Some(mut s) = g.spare.take() {
-                if g.spare_model == model {
-                    g.current.insert(model, s);
+                if g.spare_model == model && g.spare_web == web_search_on(app) {
+                    let web = g.spare_web;
+                    g.current.insert((model, web), s);
                 } else {
                     s.kill();
                 }

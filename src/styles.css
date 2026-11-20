@@ -6,6 +6,8 @@
   --fg: #1c1c1e;
   --border: #d0d0d5;
   --q-bg: #f0f0f4;
+  --q-bubble-bg: #e4eefc;
+  --q-bubble-edge: #3b7ddd;
   --error: #c62828;
   --code-bg: #f6f6f9;
   --hl-keyword: #a626a4;
@@ -25,6 +27,8 @@
     --fg: #f2f2f4;
     --border: #3a3a3f;
     --q-bg: #2a2a2e;
+    --q-bubble-bg: #1f2d42;
+    --q-bubble-edge: #5b9cff;
     --error: #ff6b6b;
     --code-bg: #26262a;
     --hl-keyword: #d68cf0;
@@ -178,7 +182,8 @@ body {
 }
 
 .question {
-  background: var(--q-bg);
+  background: var(--q-bubble-bg);
+  border-left: 3px solid var(--q-bubble-edge);
   border-radius: 8px;
   padding: 8px 12px;
   margin: 12px 0 8px;

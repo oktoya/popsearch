@@ -522,7 +522,8 @@ function enableInput(focus: boolean) {
   if (focus) input.focus();
 }
 
-function send(text: string, model: ModelKey) {
+function send(text: string, model: ModelKey, forceWeb = false) {
+  const web = settings.web_search || forceWeb;
   const atts = attachments;
   clearAttachments();
   historyPanel.close(true);
@@ -533,7 +534,7 @@ function send(text: string, model: ModelKey) {
     else fileNames.push(a.name);
   }
   const q = buildQuestion(text, thumbs, model, fileNames);
-  const ctxKey = settings.provider === "api" ? "api" : model;
+  const ctxKey = settings.provider === "api" ? "api" : web ? model + ":web" : model;
   const providerText = buildProviderText(text, ctxKey);
   pendingSave = {
     text,
@@ -557,7 +558,7 @@ function send(text: string, model: ModelKey) {
   input.disabled = true;
   scrollToBottom();
   if (settings.provider === "api") {
-    askApi(providerText, atts, settings.web_search, model, {
+    askApi(providerText, atts, web, model, {
       onChunk,
       onDone,
       onError,
@@ -567,6 +568,7 @@ function send(text: string, model: ModelKey) {
     invoke("ask", {
       text: providerText,
       model,
+      webSearch: web,
       attachments: atts.map((a) =>
         a.kind === "image"
           ? { kind: "image", media_type: a.mediaType, data: a.data, name: a.name }
@@ -817,6 +819,7 @@ input.addEventListener("keydown", (e) => {
   e.preventDefault();
   const parsed = parseModel(input.value, attachments.length > 0);
   const text = parsed.text;
+  const forceWeb = e.altKey;
   if (text.trim() === "" && attachments.length === 0) return;
   if (historyPanel.isViewing()) {
     const conv = historyPanel.viewing();
@@ -827,11 +830,11 @@ input.addEventListener("keydown", (e) => {
     continueFrom(conv).then(() => {
       attachments = keepAttachments;
       renderChips();
-      send(text, parsed.model);
+      send(text, parsed.model, forceWeb);
     });
     return;
   }
-  send(text, parsed.model);
+  send(text, parsed.model, forceWeb);
 });
 
 window.addEventListener("keydown", async (e) => {
