@@ -159,3 +159,4 @@ Target files: `src/main.ts`, `src-tauri/src/lib.rs`, `README.md`, `SPEC.md`
 
 ## 1단계 직접 수정 (문서)
 - README·SPEC를 맥 지원 기준으로 갱신: 지원 현황, 기본 단축키(Cmd+Shift+Space), macOS claude 탐색 경로, 선택 텍스트 맥 동작, 데이터 위치(Application Support·키체인·LaunchAgent), 알려진 제한(서명 없음·클립보드 미복원·Intel 미테스트), macOS 빌드 절차, SPEC 자동 실행 행. 동작 변경 없음.
+- README·SPEC: "빌드한 맥에서만 실행" 표현 정정 — 다른 Apple Silicon 맥에 복사해 쓸 수 있고 첫 실행 때 Gatekeeper 허용 필요. "다른 맥에서 쓰기" 절 추가. Intel 맥은 대상 아님(사용자 결정).

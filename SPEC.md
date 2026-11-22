@@ -1,6 +1,6 @@
 # 팝써치 (PopSearch) 설계
 
-전역 단축키로 바로 띄우는 AI 검색창. Windows 먼저, macOS 공용 구조(Apple Silicon 맥에서 빌드·동작 확인, 서명 없는 `.app` 번들).
+전역 단축키로 바로 띄우는 AI 검색창. Windows 먼저, macOS 공용 구조(Apple Silicon 전용, 빌드·동작 확인. Apple 개발자 서명·공증 없는 `.app` 번들 — 다른 맥은 첫 실행 때 Gatekeeper 허용 필요, Intel 맥은 대상 아님).
 
 ## 확정 사항
 | 항목 | 결정 |
