@@ -2,12 +2,13 @@
 
 전역 단축키로 바로 띄우는 Claude 검색창입니다. 맥의 Spotlight처럼 어디서든 단축키를 누르면 창이 뜨고, 질문하면 Claude가 답합니다.
 
-- Windows 10/11 지원 (macOS는 공용 구조로 만들고 있으며 아직 정식 지원 전)
+- Windows 10/11 지원
+- macOS 지원 (Apple Silicon 맥에서 빌드·테스트. 서명되지 않은 앱이라 소스에서 직접 빌드해 씁니다 — [아래](#macos에서-빌드하기) 참고)
 - [Tauri 2](https://tauri.app) 기반이라 가볍습니다 (설치 파일 약 3MB)
 
 ## 주요 기능
 
-- **전역 단축키**(기본 `Ctrl+Shift+Space`)로 열기. 다시 누르거나 다른 곳을 클릭하면 숨고, `Esc`로 닫으면 대화가 초기화됩니다.
+- **전역 단축키**(기본 `Ctrl+Shift+Space`, macOS는 `Cmd+Shift+Space`)로 열기. 다시 누르거나 다른 곳을 클릭하면 숨고, `Esc`로 닫으면 대화가 초기화됩니다.
 - **두 가지 연결 방식**
   - **CLI**: 설치된 Claude Code CLI로 질문합니다. Claude 구독(Pro/Max) 사용량을 씁니다.
   - **API**: 본인의 Anthropic API 키로 질문합니다. 쓴 만큼만 과금됩니다.
@@ -44,6 +45,7 @@
   ```
   (`claude`를 처음 실행하면 로그인 안내가 나옵니다.)
 - 팝써치는 `PATH`에서 `claude.exe`를 찾습니다. npm으로 설치했다면 자동으로 찾습니다. 다른 곳에 있다면 환경 변수 `POPSEARCH_CLAUDE_BIN`에 `claude.exe`의 전체 경로를 지정하세요.
+- **macOS**: 공식 설치 스크립트(`curl -fsSL https://claude.ai/install.sh | bash`)로 설치해도 됩니다. Finder·Dock·로그인 시 자동 실행으로 뜬 앱은 셸의 `PATH`를 물려받지 못하므로, 팝써치는 `PATH`에서 `claude`를 못 찾으면 `~/.local/bin`, `~/.claude/local`, `/opt/homebrew/bin`, `/usr/local/bin`을 차례로 찾습니다.
 - 질문은 구독의 사용 한도에서 차감됩니다. Claude Code로 하는 다른 작업과 한도를 함께 씁니다.
 
 ### API 방식을 쓸 때
@@ -63,13 +65,13 @@
 
 실행 파일만 쓸 때는 **처음 실행한 위치로 자동 실행이 등록**됩니다. 나중에 파일을 옮겼다면 옮긴 위치에서 한 번 실행한 뒤, 설정의 자동 실행을 껐다 켜서 경로를 다시 등록하세요.
 
-실행하면 트레이(작업 표시줄 오른쪽 아래)에 아이콘이 생기고 창은 숨어 있습니다. 단축키로 여세요. 트레이 아이콘을 눌러도 열 수 있습니다.
+실행하면 트레이(작업 표시줄 오른쪽 아래)에 아이콘이 생기고 창은 숨어 있습니다. 단축키로 여세요. 트레이 아이콘을 눌러도 열 수 있습니다. macOS는 [아래](#macos에서-빌드하기)를 참고하세요.
 
 ## 사용법
 
 | 키 | 동작 |
 |---|---|
-| `Ctrl+Shift+Space` | 열기 / 숨기기 (설정에서 변경) |
+| `Ctrl+Shift+Space` | 열기 / 숨기기 (설정에서 변경). macOS는 `Cmd+Shift+Space` |
 | `Enter` | 질문 보내기 |
 | `Shift+Enter` | 줄바꿈 |
 | `Esc` | 열린 패널 닫기 → 한 번 더 누르면 대화 초기화 후 숨기기 |
@@ -88,23 +90,25 @@
 3. 터미널과 코드 에디터에서는 `Ctrl+C`가 "실행 중지"나 "현재 줄 복사"로 동작할 수 있어서 2번을 하지 않습니다. 대상은 Windows Terminal, 명령 프롬프트, PowerShell, Git Bash, VS Code, Cursor, JetBrains 계열 등이며, 목록은 `src-tauri/src/selection.rs`에 있습니다.
 4. 섞인 선택에 포함된 웹 이미지는 이미지 주소에서 내려받아 첨부합니다. 첨부된 것은 보내기 전에 ✕로 뺄 수 있습니다.
 
+**macOS**에서는 1·3번 없이, 앱이 `Cmd+C`를 대신 눌러 복사한 텍스트만 가져옵니다(그림은 가져오지 않음). 입력기(한글/영어)와 상관없이 C 키 자체를 보내고, 팝써치가 이미 앞에 나와 있으면 복사하지 않습니다. 원래 클립보드 내용은 되돌리지 않습니다.
+
 이 기능이 필요 없다면 설정에서 `단축키로 열 때 선택한 텍스트 가져오기`를 끄세요.
 
 ## 데이터와 개인정보
 
 | 항목 | 저장 위치 |
 |---|---|
-| 설정 | `%APPDATA%\com.popsearch.app\settings.json` |
-| 히스토리 | `%APPDATA%\com.popsearch.app\history.db` (SQLite) |
-| API 키 | Windows 자격 증명 관리자 (`PopSearch` 항목). 파일로 저장하지 않습니다 |
+| 설정 | `%APPDATA%\com.popsearch.app\settings.json` (macOS: `~/Library/Application Support/com.popsearch.app/settings.json`) |
+| 히스토리 | `%APPDATA%\com.popsearch.app\history.db` (SQLite) (macOS: `~/Library/Application Support/com.popsearch.app/history.db`) |
+| API 키 | Windows 자격 증명 관리자 (`PopSearch` 항목), macOS는 키체인. 파일로 저장하지 않습니다 |
 
 - 질문, 첨부 파일, 이어서 묻기용 이전 대화는 선택한 방식에 따라 Anthropic으로 전송됩니다. CLI 방식은 Claude Code를 거치고, API 방식은 Anthropic API로 바로 갑니다.
 - 히스토리에는 이미지 축소본과 첨부 파일 이름만 저장되고, 파일 내용은 저장되지 않습니다.
-- 앱을 지워도 위 데이터는 남습니다. 완전히 지우려면 `%APPDATA%\com.popsearch.app` 폴더와 자격 증명 관리자의 `PopSearch` 항목을 삭제하세요.
+- 앱을 지워도 위 데이터는 남습니다. 완전히 지우려면 `%APPDATA%\com.popsearch.app` 폴더와 자격 증명 관리자의 `PopSearch` 항목을 삭제하세요. macOS는 `~/Library/Application Support/com.popsearch.app` 폴더, 키체인 접근의 `PopSearch` 항목, 자동 실행 항목 `~/Library/LaunchAgents/PopSearch.plist`를 삭제하세요.
 
 ## 알려진 제한
 
-- **macOS**: 공용 구조로 만들었지만 아직 맥에서 빌드·테스트하지 않았습니다. 맥에서는 선택 텍스트를 `Cmd+C`로만 가져오고 클립보드를 되돌리지 않습니다.
+- **macOS**: 서명·공증되지 않은 앱이라 빌드한 맥에서만 바로 실행됩니다(다른 맥으로 옮기면 Gatekeeper가 막음). 선택 텍스트는 `Cmd+C`로만 가져오고 클립보드를 되돌리지 않으며, 그림은 가져오지 않습니다. Intel 맥에서는 테스트하지 않았습니다.
 - **워드·엑셀 등**: 텍스트와 표만 전달합니다. 문서 속 그림, 차트, 서식은 빠집니다.
 - **CLI 방식**: 모델마다 별도 프로세스를 쓰므로, 처음 쓰는 모델은 첫 응답이 1~2초 늦습니다.
 - **기록에서 이어서 묻기**: 이전 대화를 텍스트로 함께 보내므로, 이전 대화의 이미지는 "(이미지 첨부됨)"이라는 표시로만 전달됩니다.
@@ -120,5 +124,20 @@ npm run tauri build    # 설치 파일 생성 → src-tauri/target/release/bundl
 ```
 
 - 테스트: `cargo test --manifest-path src-tauri/Cargo.toml`
-- 개발 모드에서는 자동 실행 설정이 OS에 적용되지 않습니다(설치본에서만 적용).
+- 개발 모드에서는 자동 실행 설정이 OS에 적용되지 않습니다(설치본·릴리스 빌드에서만 적용).
 - 설계 문서는 [SPEC.md](SPEC.md), 작업 기록은 [orders/](orders/)에 있습니다.
+
+### macOS에서 빌드하기
+
+필요한 것: Node.js 20 이상, Rust(stable), Xcode 명령줄 도구(`xcode-select --install`).
+
+```
+npm install
+npm run tauri build -- --bundles app   # → src-tauri/target/release/bundle/macos/PopSearch.app
+```
+
+- 만든 `PopSearch.app`을 `/Applications`(응용 프로그램)로 옮긴 뒤 실행하세요. 처음 실행할 때 로그인 시 자동 실행이 `~/Library/LaunchAgents/PopSearch.plist`로 등록되므로, 시스템 설정의 "로그인 시 열기"에 따로 추가하지 마세요(두 번 실행됨).
+- 메뉴 막대(화면 오른쪽 위)에 아이콘이 생기고 창은 숨어 있습니다. `Cmd+Shift+Space`로 여세요.
+- API 키를 저장한 뒤 처음 열 때 키체인 접근 확인 창이 뜨면 맥 로그인 암호를 넣고 **항상 허용**을 누르세요. 개발 모드(`npm run tauri dev`)에서는 다시 빌드할 때마다 다시 묻습니다.
+- 다시 빌드했다면 `/Applications`의 앱을 새 앱으로 바꿔 넣으면 됩니다.
+- `npm install` 뒤 프론트 빌드가 `@rolldown/binding-darwin-arm64`를 못 찾는다며 실패하면, `node_modules`를 지우고 `npm install`을 다시 실행하세요(npm 선택적 의존성 문제).

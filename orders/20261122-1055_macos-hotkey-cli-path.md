@@ -156,3 +156,6 @@ Target files: `src/main.ts`, `src-tauri/src/lib.rs`, `README.md`, `SPEC.md`
 
 ## 사용자 확인 (Order 4 이후)
 - 맥 dev 앱에서 Cmd+H(한글·영어 입력 모두) 히스토리 열림, Cmd+C/V/A 정상, 아이콘 크기 일치 확인.
+
+## 1단계 직접 수정 (문서)
+- README·SPEC를 맥 지원 기준으로 갱신: 지원 현황, 기본 단축키(Cmd+Shift+Space), macOS claude 탐색 경로, 선택 텍스트 맥 동작, 데이터 위치(Application Support·키체인·LaunchAgent), 알려진 제한(서명 없음·클립보드 미복원·Intel 미테스트), macOS 빌드 절차, SPEC 자동 실행 행. 동작 변경 없음.
