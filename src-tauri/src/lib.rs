@@ -43,8 +43,12 @@ fn show_window_with(app: &AppHandle, selection: selection::Selection) {
         }
     }
 
-    let _ = win.show();
-    let _ = win.set_focus();
+    let _r_show = win.show();
+    #[cfg(debug_assertions)]
+    eprintln!("[popsearch-debug] show() ok={}", _r_show.is_ok());
+    let _r_focus = win.set_focus();
+    #[cfg(debug_assertions)]
+    eprintln!("[popsearch-debug] set_focus() ok={}", _r_focus.is_ok());
     let _ = app.emit(
         "popsearch://shown",
         serde_json::json!({ "selection": selection.text, "image": selection.image }),
@@ -54,6 +58,8 @@ fn show_window_with(app: &AppHandle, selection: selection::Selection) {
 fn toggle_window(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         if win.is_visible().unwrap_or(false) && win.is_focused().unwrap_or(false) {
+            #[cfg(debug_assertions)]
+            eprintln!("[popsearch-debug] toggle: hide (visible+focused)");
             let _ = win.hide();
             return;
         }
@@ -63,7 +69,15 @@ fn toggle_window(app: &AppHandle) {
         .get_webview_window("main")
         .map(|w| w.is_focused().unwrap_or(false))
         .unwrap_or(false);
-    if capture && !own_focus {
+    #[cfg(target_os = "macos")]
+    let app_active = objc2_app_kit::NSRunningApplication::currentApplication().isActive();
+    #[cfg(not(target_os = "macos"))]
+    let app_active = false;
+    #[cfg(all(debug_assertions, target_os = "macos"))]
+    eprintln!("[popsearch-debug] toggle: app_active={}", app_active);
+    if capture && !own_focus && !app_active {
+        #[cfg(debug_assertions)]
+        eprintln!("[popsearch-debug] toggle: capture thread");
         let app = app.clone();
         std::thread::spawn(move || {
             let sel = selection::capture_selection();
@@ -76,6 +90,8 @@ fn toggle_window(app: &AppHandle) {
             }
         });
     } else {
+        #[cfg(debug_assertions)]
+        eprintln!("[popsearch-debug] toggle: direct show");
         show_window(app);
     }
 }
@@ -176,6 +192,8 @@ pub fn run() {
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
+                    #[cfg(debug_assertions)]
+                    eprintln!("[popsearch-debug] shortcut event: {:?}", event.state());
                     if event.state() == ShortcutState::Pressed {
                         toggle_window(app);
                     }
@@ -210,10 +228,22 @@ pub fn run() {
             history::save_text_file
         ])
         .on_window_event(|window, event| {
+            #[cfg(debug_assertions)]
+            if let WindowEvent::Focused(f) = event {
+                if window.label() == "main" {
+                    eprintln!(
+                        "[popsearch-debug] Focused({}) suppress={}",
+                        f,
+                        SUPPRESS_HIDE.load(std::sync::atomic::Ordering::SeqCst)
+                    );
+                }
+            }
             if let WindowEvent::Focused(false) = event {
                 if window.label() == "main"
                     && !SUPPRESS_HIDE.load(std::sync::atomic::Ordering::SeqCst)
                 {
+                    #[cfg(debug_assertions)]
+                    eprintln!("[popsearch-debug] hide executed");
                     let _ = window.hide();
                 }
             }
@@ -221,6 +251,40 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::menu::{PredefinedMenuItem, Submenu};
+                let app_menu = Submenu::with_items(
+                    app,
+                    app.package_info().name.clone(),
+                    true,
+                    &[
+                        &PredefinedMenuItem::about(app, None, None)?,
+                        &PredefinedMenuItem::separator(app)?,
+                        &PredefinedMenuItem::services(app, None)?,
+                        &PredefinedMenuItem::separator(app)?,
+                        &PredefinedMenuItem::hide_others(app, None)?,
+                        &PredefinedMenuItem::separator(app)?,
+                        &PredefinedMenuItem::quit(app, None)?,
+                    ],
+                )?;
+                let edit_menu = Submenu::with_items(
+                    app,
+                    "Edit",
+                    true,
+                    &[
+                        &PredefinedMenuItem::undo(app, None)?,
+                        &PredefinedMenuItem::redo(app, None)?,
+                        &PredefinedMenuItem::separator(app)?,
+                        &PredefinedMenuItem::cut(app, None)?,
+                        &PredefinedMenuItem::copy(app, None)?,
+                        &PredefinedMenuItem::paste(app, None)?,
+                        &PredefinedMenuItem::select_all(app, None)?,
+                    ],
+                )?;
+                app.set_menu(Menu::with_items(app, &[&app_menu, &edit_menu])?)?;
+            }
 
             let manager = provider_cli::Manager::new();
             manager.warm_up(app.handle());

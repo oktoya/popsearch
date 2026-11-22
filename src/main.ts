@@ -9,6 +9,8 @@ import { initSettingsPanel, loadSettings, capturingHotkey, type Settings } from 
 import { normalizeFences } from "./export";
 import { initHistoryPanel, type ConversationDetail } from "./history";
 
+const IS_MAC = navigator.userAgent.includes("Mac");
+if (IS_MAC) document.getElementById("history-btn")?.setAttribute("title", "기록 (Cmd+H)");
 const input = document.getElementById("query") as HTMLTextAreaElement;
 const results = document.getElementById("results") as HTMLDivElement;
 
@@ -819,7 +821,7 @@ input.addEventListener("keydown", (e) => {
   e.preventDefault();
   const parsed = parseModel(input.value, attachments.length > 0);
   const text = parsed.text;
-  const forceWeb = e.altKey;
+  const forceWeb = e.altKey || (IS_MAC && e.metaKey);
   if (text.trim() === "" && attachments.length === 0) return;
   if (historyPanel.isViewing()) {
     const conv = historyPanel.viewing();
@@ -901,7 +903,12 @@ window.addEventListener("keydown", async (e) => {
     await resetAll();
     invoke("hide_window");
   }
-  if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "h" || e.key === "H")) {
+  if (
+    (e.ctrlKey || (IS_MAC && e.metaKey)) &&
+    !e.shiftKey &&
+    !e.altKey &&
+    (e.key === "h" || e.key === "H" || e.code === "KeyH")
+  ) {
     e.preventDefault();
     historyPanel.toggle();
   }

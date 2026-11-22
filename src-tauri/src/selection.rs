@@ -405,6 +405,9 @@ fn capture_other() -> Selection {
 
         let mut enigo = Enigo::new(&Settings::default()).ok()?;
         enigo.key(MODIFIER, Direction::Press).ok()?;
+        #[cfg(target_os = "macos")]
+        let click = enigo.raw(8, Direction::Click); // kVK_ANSI_C: physical key, independent of input source
+        #[cfg(not(target_os = "macos"))]
         let click = enigo.key(Key::Unicode('c'), Direction::Click);
         let release = enigo.key(MODIFIER, Direction::Release);
         if click.is_err() || release.is_err() {

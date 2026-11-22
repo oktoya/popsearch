@@ -157,8 +157,25 @@ pub fn find_claude_bin() -> Option<PathBuf> {
         }
         None
     } else {
-        dirs.iter().map(|d| d.join("claude")).find(|p| is_file(p))
+        if let Some(p) = dirs.iter().map(|d| d.join("claude")).find(|p| is_file(p)) {
+            return Some(p);
+        }
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        unix_fallback_claude_paths(home.as_deref())
+            .into_iter()
+            .find(|p| is_file(p))
     }
+}
+
+fn unix_fallback_claude_paths(home: Option<&Path>) -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(h) = home {
+        v.push(h.join(".local").join("bin").join("claude"));
+        v.push(h.join(".claude").join("local").join("claude"));
+    }
+    v.push(PathBuf::from("/opt/homebrew/bin/claude"));
+    v.push(PathBuf::from("/usr/local/bin/claude"));
+    v
 }
 
 pub fn normalize_model(model: &str) -> &'static str {
@@ -484,6 +501,28 @@ impl Manager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unix_fallback_order() {
+        let with_home = unix_fallback_claude_paths(Some(Path::new("/h")));
+        assert_eq!(
+            with_home,
+            vec![
+                PathBuf::from("/h/.local/bin/claude"),
+                PathBuf::from("/h/.claude/local/claude"),
+                PathBuf::from("/opt/homebrew/bin/claude"),
+                PathBuf::from("/usr/local/bin/claude"),
+            ]
+        );
+        let no_home = unix_fallback_claude_paths(None);
+        assert_eq!(
+            no_home,
+            vec![
+                PathBuf::from("/opt/homebrew/bin/claude"),
+                PathBuf::from("/usr/local/bin/claude"),
+            ]
+        );
+    }
 
     #[test]
     fn text_delta() {
