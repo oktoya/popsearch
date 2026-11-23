@@ -79,7 +79,7 @@
 | `Ctrl+H` | 히스토리 (macOS는 `Cmd+H`, 한국어 입력기에서도 동작) |
 | `/s` `/o` `/h` (`/ㄴ` `/ㅐ` `/ㅗ`) + 공백 | 이번 질문만 Sonnet / Opus / Haiku |
 | `Alt+↑` / `Alt+↓` | 이번 질문만 더 성능 좋은 모델 / 더 빠른 모델로 (Haiku ↔ Sonnet ↔ Opus) |
-| `Alt+Enter` | 이번 질문만 웹 검색 켜고 보내기 (설정과 무관). macOS에서는 `Option+Enter` 또는 `Cmd+Enter`. 한국어 입력기는 조합 중 `Option+Enter`를 한자 변환에 쓰므로 macOS에서는 `Cmd+Enter`를 권장 |
+| `Alt+Enter` | 이번 질문만 웹 검색 켜고 보내기 (설정과 무관). 한글 조합 중에 눌러도 조합 중인 글자를 확정한 뒤 바로 보냅니다. macOS에서는 `Option+Enter` 또는 `Cmd+Enter`. macOS 한국어 입력기는 조합 중 `Option+Enter`를 한자 변환에 쓰므로 macOS에서는 `Cmd+Enter`를 권장 |
 
 입력창 오른쪽의 모델 표시를 보면 다음 질문이 어느 모델로 가는지 알 수 있습니다.
 

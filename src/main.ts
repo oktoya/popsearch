@@ -814,14 +814,22 @@ async function continueFrom(conv: ConversationDetail) {
   focusQuery();
 }
 
-input.addEventListener("keydown", (e) => {
-  if (e.key !== "Enter") return;
-  if (e.isComposing || e.keyCode === 229) return;
-  if (e.shiftKey) return;
-  e.preventDefault();
+let pendingWebSend = false;
+let pendingWebTimer: number | null = null;
+let imeComposing = false;
+
+function clearPendingWebSend() {
+  pendingWebSend = false;
+  if (pendingWebTimer !== null) {
+    clearTimeout(pendingWebTimer);
+    pendingWebTimer = null;
+  }
+}
+
+function submitQuery(forceWeb: boolean) {
+  clearPendingWebSend();
   const parsed = parseModel(input.value, attachments.length > 0);
   const text = parsed.text;
-  const forceWeb = e.altKey || (IS_MAC && e.metaKey);
   if (text.trim() === "" && attachments.length === 0) return;
   if (historyPanel.isViewing()) {
     const conv = historyPanel.viewing();
@@ -837,6 +845,41 @@ input.addEventListener("keydown", (e) => {
     return;
   }
   send(text, parsed.model, forceWeb);
+}
+
+input.addEventListener("compositionstart", () => {
+  imeComposing = true;
+  clearPendingWebSend();
+});
+
+input.addEventListener("compositionend", () => {
+  imeComposing = false;
+  if (!pendingWebSend) return;
+  clearPendingWebSend();
+  setTimeout(() => submitQuery(true), 0);
+});
+
+input.addEventListener("keydown", (e) => {
+  const isEnterKey = e.key === "Enter" || e.code === "Enter" || e.code === "NumpadEnter";
+  if (!isEnterKey) return;
+  const forceWeb = e.altKey || (IS_MAC && e.metaKey);
+  if (e.isComposing || e.keyCode === 229) {
+    if (e.shiftKey || !forceWeb) return;
+    e.preventDefault();
+    clearPendingWebSend();
+    pendingWebSend = true;
+    pendingWebTimer = window.setTimeout(() => {
+      pendingWebTimer = null;
+      if (!pendingWebSend) return;
+      pendingWebSend = false;
+      if (!imeComposing) submitQuery(true);
+    }, 150);
+    return;
+  }
+  if (e.key !== "Enter") return;
+  if (e.shiftKey) return;
+  e.preventDefault();
+  submitQuery(forceWeb);
 });
 
 window.addEventListener("keydown", async (e) => {
