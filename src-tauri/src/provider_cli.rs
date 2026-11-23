@@ -498,9 +498,186 @@ impl Manager {
     }
 }
 
+// Detection is done in the frontend (src/main.ts); this mirror is kept in sync and tested.
+#[allow(dead_code)]
+pub fn is_auth_error(msg: &str) -> bool {
+    let m = msg.to_lowercase();
+    [
+        "failed to authenticate",
+        "auth login",
+        "/login",
+        "not logged in",
+        "oauth token",
+        "authentication_error",
+        "invalid api key",
+    ]
+    .iter()
+    .any(|p| m.contains(p))
+}
+
+static LOGIN_RUNNING: AtomicBool = AtomicBool::new(false);
+
+const LOGIN_TERMINAL_HINT: &str = "터미널에서 `claude auth login`을 직접 실행해 주세요.";
+
+fn claude_cmd(bin: &Path, args: &[&str]) -> Command {
+    let mut cmd = Command::new(bin);
+    cmd.args(args)
+        .current_dir(std::env::temp_dir())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    cmd
+}
+
+fn tail_chars(s: &str, max: usize) -> String {
+    let t = s.trim();
+    let n = t.chars().count();
+    if n <= max {
+        t.to_string()
+    } else {
+        t.chars().skip(n - max).collect()
+    }
+}
+
+fn first_https_url(line: &str) -> Option<String> {
+    let i = line.find("https://")?;
+    let url: String = line[i..]
+        .chars()
+        .take_while(|c| !c.is_whitespace() && *c != '"' && *c != '\'' && *c != '<' && *c != '>')
+        .collect();
+    Some(url)
+}
+
+struct LoginGuard;
+impl Drop for LoginGuard {
+    fn drop(&mut self) {
+        LOGIN_RUNNING.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Runs `claude auth login` (the CLI opens the browser) and verifies with `claude auth status`.
+pub fn run_login(app: &AppHandle) -> Result<(), String> {
+    if LOGIN_RUNNING.swap(true, Ordering::SeqCst) {
+        return Err("이미 로그인 진행 중입니다.".to_string());
+    }
+    let _guard = LoginGuard;
+    let bin = find_claude_bin().ok_or_else(|| NOT_FOUND_MSG.to_string())?;
+    let mut child = claude_cmd(&bin, &["auth", "login"])
+        .spawn()
+        .map_err(|e| format!("CLI 실행 실패: {e}"))?;
+
+    let output = Arc::new(Mutex::new(String::new()));
+    let url_sent = Arc::new(AtomicBool::new(false));
+    let mut readers = Vec::new();
+    let streams: Vec<Box<dyn std::io::Read + Send>> = vec![
+        child.stdout.take().map(|s| Box::new(s) as Box<dyn std::io::Read + Send>),
+        child.stderr.take().map(|s| Box::new(s) as Box<dyn std::io::Read + Send>),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    for stream in streams {
+        let output = output.clone();
+        let url_sent = url_sent.clone();
+        let app = app.clone();
+        readers.push(std::thread::spawn(move || {
+            for line in BufReader::new(stream).lines().map_while(Result::ok) {
+                if let Some(url) = first_https_url(&line) {
+                    if !url_sent.swap(true, Ordering::SeqCst) {
+                        let _ = app.emit("popsearch://login-url", serde_json::json!({ "url": url }));
+                    }
+                }
+                let mut o = output.lock().unwrap();
+                o.push_str(&line);
+                o.push('\n');
+            }
+        }));
+    }
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {}
+            Err(e) => return Err(format!("로그인 프로세스 확인 실패: {e}")),
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "로그인 시간이 초과되었습니다(5분). {LOGIN_TERMINAL_HINT}"
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    // A grandchild (e.g. the browser launcher) may keep the pipe open; wait at most 2 s for readers.
+    let join_deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    for r in readers {
+        while !r.is_finished() && std::time::Instant::now() < join_deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        if r.is_finished() {
+            let _ = r.join();
+        }
+    }
+
+    let mut st = claude_cmd(&bin, &["auth", "status", "--json"])
+        .spawn()
+        .map_err(|e| format!("CLI 실행 실패: {e}"))?;
+    let mut st_out = st.stdout.take();
+    let reader = std::thread::spawn(move || {
+        let mut buf = String::new();
+        if let Some(o) = st_out.as_mut() {
+            let _ = std::io::Read::read_to_string(o, &mut buf);
+        }
+        buf
+    });
+    let st_deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        match st.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {}
+            Err(_) => break,
+        }
+        if std::time::Instant::now() >= st_deadline {
+            let _ = st.kill();
+            let _ = st.wait();
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let status_text = reader.join().unwrap_or_default();
+    let logged_in = serde_json::from_str::<serde_json::Value>(status_text.trim())
+        .ok()
+        .and_then(|v| v.get("loggedIn").and_then(|b| b.as_bool()))
+        .unwrap_or(false);
+    if logged_in {
+        Ok(())
+    } else {
+        let tail = tail_chars(&output.lock().unwrap(), 300);
+        Err(format!(
+            "로그인이 완료되지 않았습니다. {LOGIN_TERMINAL_HINT}{}",
+            if tail.is_empty() { String::new() } else { format!("\n{tail}") }
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auth_error_detection() {
+        assert!(is_auth_error("Failed to authenticate: this login reached its time limit and cannot be renewed. Run `claude auth login` to sign in again"));
+        assert!(is_auth_error("Please run /login"));
+        assert!(!is_auth_error("boom"));
+        assert!(!is_auth_error("network error: connection reset by peer"));
+    }
 
     #[test]
     fn unix_fallback_order() {

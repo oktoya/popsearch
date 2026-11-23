@@ -41,6 +41,7 @@ src-tauri/src/  Rust
 - 출력: `stream_event`(`content_block_delta`)로 글자 조각, `result`로 한 턴 종료.
 - 실측: 시작 포함 첫 응답 1.7초, 상주 상태 0.6초. 같은 프로세스는 대화를 기억 → 새 대화는 프로세스 교체 (다음 프로세스를 미리 띄워 둔다).
 - 이미지: `content`를 배열로 `[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"..."}},{"type":"text","text":"..."}]` 보내면 인식됨 (2026-11-17 실측).
+- 로그인 만료: CLI 로그인 오류(`failed to authenticate`, `auth login` 등)를 감지하면 오류 대신 한국어 안내와 [다시 로그인] 버튼을 보여 주고, 버튼을 누르면 팝써치가 `claude auth login`을 대신 실행(브라우저 로그인)한다. 끝나면 `claude auth status --json`의 `loggedIn`으로 확인하고 CLI 세션을 재시작한다. 브라우저에 코드 붙여넣기를 요구하는 환경이면 5분 제한 후 터미널 안내를 보여 준다.
 - 모델은 프로세스 시작 시 고정 → `/s`·`/o`는 해당 모델 프로세스를 따로 띄운다.
 
 ## 백틱(코드 울타리) 처리

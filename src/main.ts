@@ -716,10 +716,72 @@ function onError(message: string) {
   pendingSave = null;
   if (currentAnswer) {
     currentRaw = "";
-    currentAnswer.textContent = message;
+    if (settings.provider !== "api" && isAuthError(message)) {
+      renderLoginPrompt(currentAnswer, message);
+    } else {
+      currentAnswer.textContent = message;
+    }
     currentAnswer.classList.add("error");
   }
   enableInput(true);
+}
+
+function isAuthError(msg: string): boolean {
+  const m = msg.toLowerCase();
+  return [
+    "failed to authenticate",
+    "auth login",
+    "/login",
+    "not logged in",
+    "oauth token",
+    "authentication_error",
+    "invalid api key",
+  ].some((p) => m.includes(p));
+}
+
+function renderLoginPrompt(el: HTMLElement, original: string) {
+  el.textContent = "";
+  const line = document.createElement("div");
+  line.textContent = "Claude Code 로그인이 만료되었거나 필요합니다.";
+  const btn = document.createElement("button");
+  btn.className = "login-btn";
+  btn.textContent = "다시 로그인";
+  const info = document.createElement("div");
+  info.className = "login-info";
+  const linkBox = document.createElement("div");
+  const details = document.createElement("details");
+  details.className = "login-orig";
+  const summary = document.createElement("summary");
+  summary.textContent = "원래 오류";
+  const pre = document.createElement("div");
+  pre.textContent = original;
+  details.append(summary, pre);
+  el.append(line, btn, info, linkBox, details);
+
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    info.textContent = "브라우저에서 로그인을 마치세요… (창이 닫혀도 계속 진행됩니다)";
+    const unlisten = await listen<{ url: string }>("popsearch://login-url", (e) => {
+      const a = document.createElement("a");
+      a.className = "login-link";
+      a.href = e.payload.url;
+      a.textContent = "브라우저가 열리지 않으면 여기를 누르세요";
+      linkBox.textContent = "";
+      linkBox.append(a);
+    });
+    try {
+      await invoke("cli_login");
+      info.textContent = "로그인되었습니다. 다시 질문하세요.";
+      btn.remove();
+      enableInput(true);
+    } catch (err) {
+      info.textContent = String(err);
+      btn.disabled = false;
+    } finally {
+      unlisten();
+      linkBox.textContent = "";
+    }
+  });
 }
 
 listen<{ text: string }>("popsearch://chunk", (e) => onChunk(e.payload.text));

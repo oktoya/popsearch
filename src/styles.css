@@ -204,6 +204,21 @@ body {
   white-space: pre-wrap;
 }
 
+.answer.error .login-btn {
+  display: block;
+  margin: 6px 0;
+}
+
+.answer.error .login-info,
+.answer.error .login-orig {
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.answer.error .login-link {
+  font-size: 12px;
+}
+
 .answer > * {
   position: relative;
 }
@@ -303,6 +318,7 @@ body {
   background: transparent;
 }
 
+.login-btn,
 .copy-btn,
 .copy-all {
   font-family: inherit;

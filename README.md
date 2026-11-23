@@ -44,6 +44,7 @@
   claude
   ```
   (`claude`를 처음 실행하면 로그인 안내가 나옵니다.)
+- 로그인이 만료되면 팝써치 창의 [다시 로그인] 버튼으로 브라우저 로그인을 할 수 있습니다.
 - 팝써치는 `PATH`에서 `claude.exe`를 찾습니다. npm으로 설치했다면 자동으로 찾습니다. 다른 곳에 있다면 환경 변수 `POPSEARCH_CLAUDE_BIN`에 `claude.exe`의 전체 경로를 지정하세요.
 - **macOS**: 공식 설치 스크립트(`curl -fsSL https://claude.ai/install.sh | bash`)로 설치해도 됩니다. Finder·Dock·로그인 시 자동 실행으로 뜬 앱은 셸의 `PATH`를 물려받지 못하므로, 팝써치는 `PATH`에서 `claude`를 못 찾으면 `~/.local/bin`, `~/.claude/local`, `/opt/homebrew/bin`, `/usr/local/bin`을 차례로 찾습니다.
 - 질문은 구독의 사용 한도에서 차감됩니다. Claude Code로 하는 다른 작업과 한도를 함께 씁니다.

@@ -133,6 +133,19 @@ fn new_conversation(app: AppHandle, manager: tauri::State<provider_cli::Manager>
 }
 
 #[tauri::command]
+async fn cli_login(
+    app: AppHandle,
+    manager: tauri::State<'_, provider_cli::Manager>,
+) -> Result<(), String> {
+    let app2 = app.clone();
+    tauri::async_runtime::spawn_blocking(move || provider_cli::run_login(&app2))
+        .await
+        .map_err(|e| format!("로그인 실행 실패: {e}"))??;
+    manager.reset_sessions(&app);
+    Ok(())
+}
+
+#[tauri::command]
 fn reset_cli_sessions(app: AppHandle, manager: tauri::State<provider_cli::Manager>) {
     manager.reset_sessions(&app);
 }
@@ -213,6 +226,7 @@ pub fn run() {
             extract_office,
             new_conversation,
             reset_cli_sessions,
+            cli_login,
             get_system_prompt,
             get_hotkey_error,
             set_hotkey,
