@@ -879,6 +879,17 @@ async function continueFrom(conv: ConversationDetail) {
 let pendingWebSend = false;
 let pendingWebTimer: number | null = null;
 let imeComposing = false;
+let pendingHistory = false;
+let pendingHistoryTimer: number | null = null;
+let historyKeyHandled = false;
+
+function clearPendingHistory() {
+  pendingHistory = false;
+  if (pendingHistoryTimer !== null) {
+    clearTimeout(pendingHistoryTimer);
+    pendingHistoryTimer = null;
+  }
+}
 
 function clearPendingWebSend() {
   pendingWebSend = false;
@@ -912,10 +923,15 @@ function submitQuery(forceWeb: boolean) {
 input.addEventListener("compositionstart", () => {
   imeComposing = true;
   clearPendingWebSend();
+  clearPendingHistory();
 });
 
 input.addEventListener("compositionend", () => {
   imeComposing = false;
+  if (pendingHistory) {
+    clearPendingHistory();
+    setTimeout(() => historyPanel.toggle(), 0);
+  }
   if (!pendingWebSend) return;
   clearPendingWebSend();
   setTimeout(() => submitQuery(true), 0);
@@ -1015,6 +1031,31 @@ window.addEventListener("keydown", async (e) => {
     (e.key === "h" || e.key === "H" || e.code === "KeyH")
   ) {
     e.preventDefault();
+    historyKeyHandled = true;
+    if (e.isComposing || e.keyCode === 229 || imeComposing) {
+      // Composing: commit the syllable first, then toggle once (compositionend or 150 ms fallback).
+      clearPendingHistory();
+      pendingHistory = true;
+      pendingHistoryTimer = window.setTimeout(() => {
+        pendingHistoryTimer = null;
+        if (!pendingHistory) return;
+        pendingHistory = false;
+        if (!imeComposing) historyPanel.toggle();
+      }, 150);
+      return;
+    }
+    historyPanel.toggle();
+  }
+});
+
+// Fallback: some IMEs (e.g. Windows Korean) swallow the keydown while composing, so only the
+// keyup reaches us. If no keydown of this H press was handled above, toggle history here once.
+window.addEventListener("keyup", (e) => {
+  if (e.code !== "KeyH") return;
+  const handled = historyKeyHandled;
+  historyKeyHandled = false;
+  if (handled || capturingHotkey) return;
+  if ((e.ctrlKey || (IS_MAC && e.metaKey)) && !e.shiftKey && !e.altKey) {
     historyPanel.toggle();
   }
 });
