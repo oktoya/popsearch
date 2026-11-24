@@ -6,6 +6,17 @@
 - macOS 지원 (Apple Silicon 맥 전용. 소스에서 빌드하거나 빌드한 앱을 복사해 씁니다 — [아래](#macos에서-빌드하기) 참고)
 - [Tauri 2](https://tauri.app) 기반이라 가볍습니다 (설치 파일 약 3MB)
 
+## 화면
+
+<p align="center"><img src="docs/images/popup.png" width="720" alt="팝업 검색창: 질문과 코드·표가 있는 답변"></p>
+
+<p align="center">
+  <img src="docs/images/settings.png" width="360" alt="설정 화면">
+  <img src="docs/images/history.png" width="360" alt="히스토리 화면">
+</p>
+
+<p align="center"><sub>왼쪽부터 설정 화면(F5), 히스토리(Ctrl+H). 화면 속 내용은 예시 데이터입니다.</sub></p>
+
 ## 주요 기능
 
 - **전역 단축키**(기본 `Ctrl+Shift+Space`, macOS는 `Cmd+Shift+Space`)로 열기. 다시 누르거나 다른 곳을 클릭하면 숨고, `Esc`로 닫으면 대화가 초기화됩니다.
