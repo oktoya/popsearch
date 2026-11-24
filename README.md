@@ -8,11 +8,11 @@
 
 ## 화면
 
-<p align="center"><img src="docs/images/popup.png" width="720" alt="팝업 검색창: 질문과 코드·표가 있는 답변"></p>
+<p align="center"><img src="docs/images/screen-popup.png" width="720" alt="팝업 검색창: 질문과 코드·표가 있는 답변"></p>
 
 <p align="center">
-  <img src="docs/images/settings.png" width="360" alt="설정 화면">
-  <img src="docs/images/history.png" width="360" alt="히스토리 화면">
+  <img src="docs/images/screen-settings.png" width="360" alt="설정 화면">
+  <img src="docs/images/screen-history.png" width="360" alt="히스토리 화면">
 </p>
 
 <p align="center"><sub>왼쪽부터 설정 화면(F5), 히스토리(Ctrl+H). 화면 속 내용은 예시 데이터입니다.</sub></p>
