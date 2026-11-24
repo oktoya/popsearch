@@ -882,6 +882,7 @@ let imeComposing = false;
 let pendingHistory = false;
 let pendingHistoryTimer: number | null = null;
 let historyKeyHandled = false;
+let ignoreEnterUntil = 0;
 
 function clearPendingHistory() {
   pendingHistory = false;
@@ -940,11 +941,31 @@ input.addEventListener("compositionend", () => {
 input.addEventListener("keydown", (e) => {
   const isEnterKey = e.key === "Enter" || e.code === "Enter" || e.code === "NumpadEnter";
   if (!isEnterKey) return;
+  if (ignoreEnterUntil > 0) {
+    const stillIgnoring = performance.now() < ignoreEnterUntil;
+    ignoreEnterUntil = 0;
+    if (stillIgnoring) {
+      e.preventDefault();
+      return;
+    }
+  }
   const forceWeb = e.altKey || (IS_MAC && e.metaKey);
   if (e.isComposing || e.keyCode === 229) {
     if (e.shiftKey || !forceWeb) return;
     e.preventDefault();
     clearPendingWebSend();
+    if (!IS_MAC) {
+      // 이 Windows 한글 IME는 Alt+Enter로 조합을 확정하지 않아 compositionend가 오지 않는다.
+      // 입력창 포커스를 잠깐 뺐다 돌려 조합을 강제로 확정한다.
+      input.blur();
+      input.focus();
+      if (!imeComposing) {
+        // 같은 키 입력의 뒤따르는 Enter keydown이 한 번 더 오므로 중복 전송을 막는다.
+        ignoreEnterUntil = performance.now() + 300;
+        submitQuery(true);
+        return;
+      }
+    }
     pendingWebSend = true;
     pendingWebTimer = window.setTimeout(() => {
       pendingWebTimer = null;
