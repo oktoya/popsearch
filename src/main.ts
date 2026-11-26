@@ -981,6 +981,21 @@ input.addEventListener("keydown", (e) => {
   submitQuery(forceWeb);
 });
 
+let escHidePending = false;
+
+window.addEventListener("blur", () => {
+  escHidePending = false;
+});
+
+window.addEventListener("keyup", async (e) => {
+  if (e.key !== "Escape" || !escHidePending) return;
+  escHidePending = false;
+  if (capturingHotkey) return;
+  e.preventDefault();
+  await resetAll();
+  invoke("hide_window");
+});
+
 window.addEventListener("keydown", async (e) => {
   if (capturingHotkey) return;
   if (
@@ -1042,8 +1057,10 @@ window.addEventListener("keydown", async (e) => {
       historyPanel.close();
       return;
     }
-    await resetAll();
-    invoke("hide_window");
+    if (e.repeat) return;
+    // Hide on keyup so the still-held Escape's keyup does not reach the browser behind.
+    escHidePending = true;
+    return;
   }
   if (
     (e.ctrlKey || (IS_MAC && e.metaKey)) &&
