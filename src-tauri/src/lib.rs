@@ -16,6 +16,136 @@ fn show_window(app: &AppHandle) {
     show_window_with(app, selection::Selection::default());
 }
 
+#[cfg(target_os = "macos")]
+fn apply_macos_space_behavior(win: &tauri::WebviewWindow) {
+    let handle = win.clone();
+    let _ = win.run_on_main_thread(move || {
+        use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
+        let Ok(ptr) = handle.ns_window() else {
+            return;
+        };
+        if ptr.is_null() {
+            return;
+        }
+        let ns_window: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
+        let behavior = ns_window.collectionBehavior()
+            | NSWindowCollectionBehavior::CanJoinAllSpaces
+            | NSWindowCollectionBehavior::FullScreenAuxiliary;
+        ns_window.setCollectionBehavior(behavior);
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[popsearch-debug] collectionBehavior bits={:#x}",
+            ns_window.collectionBehavior().0
+        );
+    });
+}
+
+#[cfg(target_os = "macos")]
+mod macos_panel {
+    use objc2::{define_class, ClassType, MainThreadOnly};
+    use objc2_app_kit::NSPanel;
+
+    define_class!(
+        // SAFETY: NSPanel has no special subclassing requirements. The single
+        // u64 ivar only pads the instance size to match tao's TaoWindow (which
+        // adds one 8-byte ivar); it is never read or written. The size equality
+        // is verified at runtime before the class swap.
+        #[unsafe(super(NSPanel))]
+        #[thread_kind = MainThreadOnly]
+        #[name = "PopSearchPanel"]
+        #[ivars = u64]
+        pub struct PopSearchPanel;
+
+        impl PopSearchPanel {
+            #[unsafe(method(canBecomeKeyWindow))]
+            fn can_become_key_window(&self) -> bool {
+                true
+            }
+
+            #[unsafe(method(canBecomeMainWindow))]
+            fn can_become_main_window(&self) -> bool {
+                false
+            }
+        }
+    );
+
+    pub fn class() -> &'static objc2::runtime::AnyClass {
+        PopSearchPanel::class()
+    }
+}
+
+/// Converts the tao-created NSWindow into a non-activating NSPanel (macOS).
+/// Level: keeps the floating level from alwaysOnTop (NSFloatingWindowLevel).
+#[cfg(target_os = "macos")]
+fn convert_to_macos_panel(win: &tauri::WebviewWindow) {
+    let handle = win.clone();
+    let _ = win.run_on_main_thread(move || {
+        use objc2::runtime::AnyObject;
+        use objc2_app_kit::{NSPanel, NSWindow, NSWindowStyleMask};
+        let Ok(ptr) = handle.ns_window() else {
+            return;
+        };
+        if ptr.is_null() {
+            return;
+        }
+        // SAFETY: ptr is a valid NSWindow owned by tao; we are on the main thread.
+        let obj: &AnyObject = unsafe { &*(ptr as *const AnyObject) };
+        let old_size = obj.class().instance_size();
+        let new_size = macos_panel::class().instance_size();
+        if old_size != new_size {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "[popsearch-debug] panel conversion skipped: instance size {} != {}",
+                old_size, new_size
+            );
+            return;
+        }
+        // SAFETY: instance sizes are equal (checked above) and the new class is a
+        // subclass of NSPanel; tao's ivar memory stays in place and is not touched.
+        unsafe {
+            AnyObject::set_class(obj, macos_panel::class());
+        }
+        // SAFETY: the object is now an instance of a NSPanel subclass.
+        let panel: &NSPanel = unsafe { &*(ptr as *const NSPanel) };
+        let ns_window: &NSWindow = panel;
+        ns_window.setStyleMask(ns_window.styleMask() | NSWindowStyleMask::NonactivatingPanel);
+        panel.setFloatingPanel(true);
+        ns_window.setHidesOnDeactivate(false);
+        panel.setBecomesKeyOnlyIfNeeded(false);
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[popsearch-debug] panel converted: class={} styleMask={:#x} level={}",
+            ns_window.class().name().to_string_lossy(),
+            ns_window.styleMask().0,
+            ns_window.level()
+        );
+    });
+}
+
+/// Shows the panel without activating the app (macOS).
+#[cfg(target_os = "macos")]
+fn show_macos_panel(win: &tauri::WebviewWindow) {
+    let handle = win.clone();
+    let _ = win.run_on_main_thread(move || {
+        use objc2_app_kit::NSWindow;
+        let Ok(ptr) = handle.ns_window() else {
+            return;
+        };
+        if ptr.is_null() {
+            return;
+        }
+        // SAFETY: ptr is a valid NSWindow owned by tao; we are on the main thread.
+        let ns_window: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
+        ns_window.orderFrontRegardless();
+        ns_window.makeKeyWindow();
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[popsearch-debug] panel show: isKeyWindow={}",
+            ns_window.isKeyWindow()
+        );
+    });
+}
+
 fn show_window_with(app: &AppHandle, selection: selection::Selection) {
     let Some(win) = app.get_webview_window("main") else {
         return;
@@ -43,12 +173,21 @@ fn show_window_with(app: &AppHandle, selection: selection::Selection) {
         }
     }
 
-    let _r_show = win.show();
-    #[cfg(debug_assertions)]
-    eprintln!("[popsearch-debug] show() ok={}", _r_show.is_ok());
-    let _r_focus = win.set_focus();
-    #[cfg(debug_assertions)]
-    eprintln!("[popsearch-debug] set_focus() ok={}", _r_focus.is_ok());
+    #[cfg(target_os = "macos")]
+    apply_macos_space_behavior(&win);
+
+    #[cfg(target_os = "macos")]
+    show_macos_panel(&win);
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _r_show = win.show();
+        #[cfg(debug_assertions)]
+        eprintln!("[popsearch-debug] show() ok={}", _r_show.is_ok());
+        let _r_focus = win.set_focus();
+        #[cfg(debug_assertions)]
+        eprintln!("[popsearch-debug] set_focus() ok={}", _r_focus.is_ok());
+    }
     let _ = app.emit(
         "popsearch://shown",
         serde_json::json!({ "selection": selection.text, "image": selection.image }),
@@ -265,6 +404,12 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            #[cfg(target_os = "macos")]
+            if let Some(main_win) = app.get_webview_window("main") {
+                convert_to_macos_panel(&main_win);
+                apply_macos_space_behavior(&main_win);
+            }
 
             #[cfg(target_os = "macos")]
             {

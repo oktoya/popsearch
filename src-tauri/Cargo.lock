@@ -3071,6 +3071,7 @@ dependencies = [
  "arboard",
  "enigo",
  "keyring",
+ "objc2",
  "objc2-app-kit",
  "quick-xml 0.37.5",
  "rusqlite",
