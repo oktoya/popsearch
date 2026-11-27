@@ -35,14 +35,17 @@ export function normalizeFences(src: string): string {
   return lines.join("\n");
 }
 
+const MODEL_NAMES: Record<string, string> = { haiku: "Haiku", sonnet: "Sonnet", opus: "Opus" };
+
 export function conversationToMarkdown(conv: ConversationDetail): string {
   const when = new Date(conv.created_at).toLocaleString();
-  const parts: string[] = [`# ${conv.title}`, `_${when} · ${conv.provider} · ${conv.model}_`];
+  const parts: string[] = [`# ${conv.title}`, `_${when} · ${conv.provider}_`];
   for (const m of conv.messages) {
     parts.push("## 질문");
     if (m.question.trim() !== "") parts.push(m.question);
     for (const img of m.images) parts.push(`![image](${img})`);
     parts.push("## 답변");
+    parts.push(`_${MODEL_NAMES[m.model] ?? m.model}${m.web ? " · 웹 검색" : ""}_`);
     parts.push(normalizeFences(m.answer));
     if (m.sources && m.sources.length > 0) {
       parts.push("### 출처");

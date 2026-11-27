@@ -8,6 +8,7 @@ export interface HistoryMessage {
   answer: string;
   model: string;
   sources: Source[];
+  web: boolean;
 }
 
 export interface ConversationDetail {

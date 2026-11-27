@@ -127,6 +127,7 @@ let pendingSave: {
   thumbs: string[];
   provider: string;
   model: ModelKey;
+  web: boolean;
   imageCount: number;
   fileNames: string[];
   ctxKey: string;
@@ -274,7 +275,6 @@ loadSettings().then((s) => {
 function buildQuestion(
   text: string,
   thumbs: string[],
-  model: string,
   fileNames: string[] = [],
 ): HTMLDivElement {
   const q = document.createElement("div");
@@ -296,15 +296,17 @@ function buildQuestion(
     q.appendChild(row);
   }
   const label = document.createElement("div");
-  if (model === "sonnet" || model === "opus") {
-    const badge = document.createElement("span");
-    badge.className = "model-badge";
-    badge.textContent = model === "sonnet" ? "Sonnet" : "Opus";
-    label.appendChild(badge);
-  }
   linkifyToNodes(text).forEach((n) => label.appendChild(n));
   q.appendChild(label);
   return q;
+}
+
+function buildAnswerMeta(model: string, web: boolean): HTMLDivElement {
+  const names: Record<string, string> = { haiku: "Haiku", sonnet: "Sonnet", opus: "Opus" };
+  const el = document.createElement("div");
+  el.className = "answer-meta";
+  el.textContent = (names[model] ?? model) + (web ? " · 🌐 웹 검색" : "");
+  return el;
 }
 
 const DEFAULT_PLACEHOLDER = "무엇이든 물어보세요";
@@ -314,7 +316,8 @@ function renderMessages(body: HTMLElement, conv: ConversationDetail) {
     const a = document.createElement("div");
     a.className = "answer";
     a.innerHTML = renderMarkdown(m.answer);
-    body.appendChild(buildQuestion(m.question, m.images, m.model));
+    body.appendChild(buildQuestion(m.question, m.images));
+    body.appendChild(buildAnswerMeta(m.model, m.web));
     body.appendChild(a);
     addCopyButtons(a);
     addPreviews(a);
@@ -535,7 +538,7 @@ function send(text: string, model: ModelKey, forceWeb = false) {
     if (a.kind === "image") thumbs.push(a.thumb);
     else fileNames.push(a.name);
   }
-  const q = buildQuestion(text, thumbs, model, fileNames);
+  const q = buildQuestion(text, thumbs, fileNames);
   const ctxKey = settings.provider === "api" ? "api" : web ? model + ":web" : model;
   const providerText = buildProviderText(text, ctxKey);
   pendingSave = {
@@ -543,6 +546,7 @@ function send(text: string, model: ModelKey, forceWeb = false) {
     thumbs,
     provider: settings.provider,
     model,
+    web,
     imageCount: thumbs.length,
     fileNames,
     ctxKey,
@@ -550,6 +554,7 @@ function send(text: string, model: ModelKey, forceWeb = false) {
   const a = document.createElement("div");
   a.className = "answer";
   results.appendChild(q);
+  results.appendChild(buildAnswerMeta(model, web));
   results.appendChild(a);
   currentAnswer = a;
   currentRaw = "";
@@ -701,6 +706,7 @@ async function onDone(sources: Source[] = []) {
         images: save.thumbs,
         answer: currentRaw,
         sources,
+        web: save.web,
       });
       if (epoch === convEpoch) conversationId = id;
     } catch (_) {
